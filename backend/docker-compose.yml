@@ -1,0 +1,16 @@
+services:
+  mysql:
+    image: mysql:8.4.11
+    container_name: pagina-tcg-mysql
+    environment:
+      MYSQL_DATABASE: pagina_tcg
+      MYSQL_USER: pagina_tcg_user
+      MYSQL_PASSWORD: ${PAGINA_TCG_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${PAGINA_TCG_ROOT_PASSWORD}
+    ports:
+      - "3307:3306"
+    volumes:
+      - pagina_tcg_mysql_data:/var/lib/mysql
+
+volumes:
+  pagina_tcg_mysql_data:
