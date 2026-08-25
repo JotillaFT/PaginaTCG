@@ -1,6 +1,9 @@
-# PaginaTCG
+# PaginaTCG — nombre provisional
 
-PaginaTCG es una biblioteca y futura herramienta avanzada de búsqueda para el **Digimon Card Game**. El objetivo es permitir encontrar cartas mediante filtros precisos sobre datos estructurados, evitando que el usuario tenga que revisar manualmente miles de cartas.
+> [!NOTE]
+> `PaginaTCG` es el nombre técnico y provisional del proyecto. El nombre público de la aplicación se decidirá más adelante.
+
+Este proyecto es una biblioteca y futura herramienta avanzada de búsqueda para el **Digimon Card Game**. El objetivo es permitir encontrar cartas mediante filtros precisos sobre datos estructurados, evitando que el usuario tenga que revisar manualmente miles de cartas.
 
 El proyecto está en una fase temprana centrada en construir correctamente el backend, el esquema de base de datos y el modelo del catálogo de cartas. La interfaz podrá ser bilingüe para usuarios hispanohablantes y angloparlantes, pero el contenido oficial de las cartas se almacenará inicialmente en inglés.
 
@@ -13,8 +16,8 @@ Implementado actualmente:
 - Backend Spring Boot en `backend/`.
 - Configuración de MySQL mediante Docker Compose.
 - Flyway como gestor de migraciones.
-- Migraciones V1 a V5 aplicadas al modelo inicial de cartas.
-- Entidades JPA para cartas, secciones, rasgos, colores y bloques de texto.
+- Migraciones V1 a V6 aplicadas al modelo inicial de cartas.
+- Entidades JPA para cartas, secciones, rasgos, colores, bloques de texto y etiquetas de efecto.
 - `CartaRepository`, basado en `JpaRepository<Carta, Long>`.
 - Búsqueda derivada `findByCodigo(String codigo)`.
 - Tests de integración básicos con Spring Boot y MySQL real.
@@ -28,7 +31,7 @@ No implementado todavía:
 - Controladores REST o endpoints de cartas.
 - Frontend Angular funcional. Existe una carpeta `frontend/`, pero actualmente no contiene una implementación.
 - Autenticación, usuarios, colecciones personales o mazos.
-- Impresiones, lanzamientos, evoluciones estructuradas, Link estructurado, etiquetas de efecto, palabras clave, restricciones completas o erratas completas.
+- Impresiones, lanzamientos, evoluciones estructuradas, Link estructurado, palabras clave, restricciones completas o erratas completas.
 
 ## Objetivos y alcance
 
@@ -194,7 +197,7 @@ Esto implica:
 - Hibernate solo valida que las entidades coincidan con el esquema de MySQL.
 - Hibernate no debe crear ni alterar automáticamente el esquema.
 - Una migración aplicada no se edita.
-- Los cambios posteriores se hacen con nuevas migraciones, por ejemplo `V6`, `V7`, etc.
+- Los cambios posteriores se hacen con nuevas migraciones, por ejemplo `V7`, `V8`, etc.
 
 Esta decisión es central para mantener controlado el modelo de datos desde las primeras fases del proyecto.
 
@@ -207,6 +210,7 @@ Esta decisión es central para mantener controlado el modelo de datos desde las 
 - `V3__crear_tablas_rasgo.sql`: crea `rasgo` y `seccion_carta_rasgo`. Los rasgos son catálogo reutilizable y la relación conserva el `orden` oficial.
 - `V4__crear_tablas_color.sql`: crea `color` y `seccion_carta_color`. Los colores son relacionales, no columnas numeradas ni texto separado por comas. La migración carga `RED`, `BLUE`, `YELLOW`, `GREEN`, `BLACK`, `PURPLE` y `WHITE`.
 - `V5__crear_tabla_bloque_texto.sql`: crea `bloque_texto`. Cada fila representa una caja oficial completa de texto asociada a una sección, con `contenido_oficial` como fuente de verdad.
+- `V6__crear_tablas_etiqueta_efecto.sql`: crea `etiqueta_efecto` y `bloque_texto_etiqueta`. Las etiquetas de efecto son un catálogo extensible y la relación indica qué etiquetas están presentes en cada bloque sin dividir `contenido_oficial`.
 
 ### Entidades y enums
 
@@ -219,6 +223,8 @@ Entidades actuales:
 - `ColorCarta`
 - `SeccionCartaColor`
 - `BloqueTexto`
+- `EtiquetaEfecto`
+- `BloqueTextoEtiqueta`
 
 Enums actuales:
 
@@ -287,12 +293,26 @@ erDiagram
         TEXT contenido_oficial
     }
 
+    etiqueta_efecto {
+        BIGINT id PK
+        VARCHAR codigo UK
+        VARCHAR nombre_oficial UK
+    }
+
+    bloque_texto_etiqueta {
+        BIGINT id PK
+        BIGINT bloque_texto_id FK
+        BIGINT etiqueta_efecto_id FK
+    }
+
     carta ||--o{ seccion_carta : contiene
     seccion_carta ||--o{ seccion_carta_rasgo : tiene
     rasgo ||--o{ seccion_carta_rasgo : clasifica
     seccion_carta ||--o{ seccion_carta_color : tiene
     color ||--o{ seccion_carta_color : clasifica
     seccion_carta ||--o{ bloque_texto : contiene
+    bloque_texto ||--o{ bloque_texto_etiqueta : marca
+    etiqueta_efecto ||--o{ bloque_texto_etiqueta : clasifica
 ```
 
 ## Decisiones principales del modelo
@@ -309,7 +329,8 @@ erDiagram
 - `nivel`, `dp` y costes se representan con `Integer` en Java para conservar correctamente los `NULL`.
 - `CategoriaCarta.DUAL` representa una carta con varias secciones funcionales; cada `SeccionCarta` conserva su categoría concreta.
 - `CategoriaBloqueTexto.EFFECT` representa la caja normal de efectos. No se llama `MAIN` porque `[Main]` es una etiqueta oficial de activación que se modelará aparte.
-- Cada `BloqueTexto` guarda una caja oficial completa. Las etiquetas futuras indicarán presencia dentro del bloque, sin dividir inicialmente cada frase o efecto individual.
+- Cada `BloqueTexto` guarda una caja oficial completa. `bloque_texto_etiqueta` permite indicar presencia de etiquetas dentro del bloque, sin dividir inicialmente cada frase o efecto individual.
+- Las etiquetas de efecto son un catálogo extensible en `etiqueta_efecto`, no un enum. La tabla todavía no contiene datos iniciales.
 
 ## Fuente de datos prevista
 
@@ -341,7 +362,8 @@ Planificado, pero no implementado todavía:
 - Evoluciones normales estructuradas.
 - Conservación de evoluciones especiales en texto oficial, con detección posterior mediante etiquetas o búsqueda textual.
 - Link estructurado: requisitos, coste, bonificación de DP, efecto y etiquetas relacionadas.
-- Catálogo de etiquetas de efecto y relación con `bloque_texto`, por ejemplo `MAIN`, `DELAY`, `ON_PLAY`, `WHEN_DIGIVOLVING`, `WHEN_ATTACKING`, `ALL_TURNS`, `ON_DELETION`, `WHEN_LINKING` o `SECURITY`.
+- Catálogo inicial de etiquetas de efecto, que se definirá analizando los textos oficiales importados. Podrá incluir códigos normalizados como `MAIN`, `DELAY`, `ON_PLAY`, `WHEN_DIGIVOLVING`, `WHEN_ATTACKING`, `ALL_TURNS` u `ON_DELETION`.
+- Extracción o detección automática de etiquetas desde los textos importados de Heroicc.
 - Palabras clave propias como datos estructurados y palabras clave mencionadas o concedidas mediante búsqueda de texto.
 - Restricciones completas, pares prohibidos y erratas.
 - API REST para consulta de cartas.
@@ -353,7 +375,7 @@ Filtros previstos para la búsqueda avanzada:
 - Código oficial, nombre, categoría, rareza, nivel, DP, coste, forma y atributo.
 - Uno o varios rasgos.
 - Uno o varios colores, con modos "contiene todos", "contiene cualquiera" o "exactamente esta combinación".
-- Categoría del bloque de texto y etiquetas de activación.
+- Categoría del bloque de texto y uso de etiquetas de activación en filtros.
 - Palabras clave propias, mencionadas o concedidas.
 - Evolución normal y detección textual de evoluciones especiales.
 - Disponibilidad, restricciones o productos cuando existan esas tablas.
