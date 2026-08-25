@@ -40,4 +40,66 @@ public class Carta {
 
     protected Carta() {
     }
+
+    public Carta(
+            String codigo,
+            String nombreGeneral,
+            CategoriaCarta categoriaCarta
+    ) {
+        this.codigo = codigo;
+        this.nombreGeneral = nombreGeneral;
+        this.categoriaCarta = categoriaCarta;
+    }
+
+    public Long getId() {
+        return id;
+    }
+
+    public String getCodigo() {
+        return codigo;
+    }
+
+    public void setCodigo(String codigo) {
+        this.codigo = codigo;
+    }
+
+    public String getNombreGeneral() {
+        return nombreGeneral;
+    }
+
+    public void setNombreGeneral(String nombreGeneral) {
+        this.nombreGeneral = nombreGeneral;
+    }
+
+    public CategoriaCarta getCategoriaCarta() {
+        return categoriaCarta;
+    }
+
+    public void setCategoriaCarta(CategoriaCarta categoriaCarta) {
+        this.categoriaCarta = categoriaCarta;
+    }
+
+    public String getRarezaBase() {
+        return rarezaBase;
+    }
+
+    public void setRarezaBase(String rarezaBase) {
+        this.rarezaBase = rarezaBase;
+    }
+
+    public String getIconoBloque() {
+        return iconoBloque;
+    }
+
+    public void setIconoBloque(String iconoBloque) {
+        this.iconoBloque = iconoBloque;
+    }
+
+    public Integer getLimiteCopiasRegla() {
+        return limiteCopiasRegla;
+    }
+
+    public void setLimiteCopiasRegla(Integer limiteCopiasRegla) {
+        this.limiteCopiasRegla = limiteCopiasRegla;
+    }
 }
