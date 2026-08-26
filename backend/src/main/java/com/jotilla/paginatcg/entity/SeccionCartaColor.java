@@ -10,6 +10,16 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
+/**
+ * Relación entre una sección de carta y uno de sus colores.
+ *
+ * <p>Se corresponde con la tabla MySQL {@code seccion_carta_color}. Permite
+ * representar secciones multicolor reutilizando el catálogo {@link ColorCarta}
+ * y evitando columnas como color1, color2 o listas separadas por comas.</p>
+ *
+ * <p>Se usará para filtros por color, incluyendo búsquedas de "contiene todos",
+ * "contiene cualquiera" o "exactamente esta combinación".</p>
+ */
 @Entity
 @Table(name = "seccion_carta_color")
 public class SeccionCartaColor {
@@ -26,6 +36,9 @@ public class SeccionCartaColor {
     @JoinColumn(name = "color_id", nullable = false)
     private ColorCarta color;
 
+    /**
+     * Posición del color dentro del orden oficial de la sección.
+     */
     @Column(name = "orden", nullable = false)
     private Integer orden;
 

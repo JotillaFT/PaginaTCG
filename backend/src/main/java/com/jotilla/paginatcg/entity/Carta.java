@@ -11,13 +11,32 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
+/**
+ * Identidad lógica de una carta del Digimon Card Game.
+ *
+ * <p>Se corresponde con la tabla MySQL {@code carta}. Esta entidad guarda los
+ * datos comunes de la carta independientemente de futuras impresiones, artes
+ * alternativas o productos. Sus secciones funcionales se modelan aparte en
+ * {@link SeccionCarta}, de modo que una carta normal pueda tener una sección y
+ * una carta {@link CategoriaCarta#DUAL} pueda tener varias.</p>
+ *
+ * <p>Se usará como raíz para filtros por código oficial, nombre, categoría,
+ * rareza, icono de bloque y límite de copias.</p>
+ */
 @Entity
 @Table(name = "carta")
 public class Carta {
+    /**
+     * Identificador interno generado por MySQL. No es el número oficial visible
+     * de la carta; para eso se usa {@link #codigo}.
+     */
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /**
+     * Número visible y oficial de la carta, por ejemplo {@code BT5-086}.
+     */
     @Column(name = "codigo", nullable = false, unique = true, length = 30)
     private String codigo;
 
@@ -35,6 +54,11 @@ public class Carta {
     @Column(name = "icono_bloque", length = 10)
     private String iconoBloque;
 
+    /**
+     * Límite propio de construcción asociado a la carta. Por defecto es 4, que
+     * representa el límite habitual; restricciones externas, baneos y pares
+     * prohibidos se modelarán aparte.
+     */
     @Column(name = "limite_copias_regla", nullable = false)
     private Integer limiteCopiasRegla = 4;
 

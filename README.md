@@ -9,6 +9,8 @@ El proyecto está en una fase temprana centrada en construir correctamente el ba
 
 Repositorio remoto: <https://github.com/JotillaFT/PaginaTCG.git>
 
+La explicación detallada del esquema, sus relaciones y las migraciones está disponible en [docs/backend/modelo-datos.md](docs/backend/modelo-datos.md).
+
 ## Estado actual
 
 Implementado actualmente:
@@ -16,8 +18,8 @@ Implementado actualmente:
 - Backend Spring Boot en `backend/`.
 - Configuración de MySQL mediante Docker Compose.
 - Flyway como gestor de migraciones.
-- Migraciones V1 a V6 aplicadas al modelo inicial de cartas.
-- Entidades JPA para cartas, secciones, rasgos, colores, bloques de texto y etiquetas de efecto.
+- Migraciones V1 a V7 implementadas y validadas para el modelo inicial de cartas.
+- Entidades JPA para cartas, secciones, rasgos, colores, bloques de texto, etiquetas de efecto y palabras clave.
 - `CartaRepository`, basado en `JpaRepository<Carta, Long>`.
 - Búsqueda derivada `findByCodigo(String codigo)`.
 - Tests de integración básicos con Spring Boot y MySQL real.
@@ -31,7 +33,7 @@ No implementado todavía:
 - Controladores REST o endpoints de cartas.
 - Frontend Angular funcional. Existe una carpeta `frontend/`, pero actualmente no contiene una implementación.
 - Autenticación, usuarios, colecciones personales o mazos.
-- Impresiones, lanzamientos, evoluciones estructuradas, Link estructurado, palabras clave, restricciones completas o erratas completas.
+- Impresiones, lanzamientos, evoluciones estructuradas, Link estructurado, restricciones completas o erratas completas.
 
 ## Objetivos y alcance
 
@@ -72,21 +74,26 @@ Dependencias principales del backend:
 
 ```text
 PaginaTCG/
-├── backend/
-│   ├── build.gradle
-│   ├── settings.gradle
-│   ├── docker-compose.yml
-│   ├── gradlew / gradlew.bat
-│   └── src/
-│       ├── main/
-│       │   ├── java/com/jotilla/paginatcg/
-│       │   │   ├── entity/
-│       │   │   └── repository/
-│       │   └── resources/
-│       │       ├── application.properties
-│       │       └── db/migration/
-│       └── test/java/com/jotilla/paginatcg/
-└── frontend/
+|-- README.md
+|-- AGENTS.md
+|-- docs/
+|   `-- backend/
+|       `-- modelo-datos.md
+|-- backend/
+|   |-- build.gradle
+|   |-- settings.gradle
+|   |-- docker-compose.yml
+|   |-- gradlew / gradlew.bat
+|   `-- src/
+|       |-- main/
+|       |   |-- java/com/jotilla/paginatcg/
+|       |   |   |-- entity/
+|       |   |   `-- repository/
+|       |   `-- resources/
+|       |       |-- application.properties
+|       |       `-- db/migration/
+|       `-- test/java/com/jotilla/paginatcg/
+`-- frontend/
 ```
 
 Paquete principal de Java:
@@ -197,7 +204,7 @@ Esto implica:
 - Hibernate solo valida que las entidades coincidan con el esquema de MySQL.
 - Hibernate no debe crear ni alterar automáticamente el esquema.
 - Una migración aplicada no se edita.
-- Los cambios posteriores se hacen con nuevas migraciones, por ejemplo `V7`, `V8`, etc.
+- Los cambios posteriores se hacen con nuevas migraciones, por ejemplo `V8`, `V9`, etc.
 
 Esta decisión es central para mantener controlado el modelo de datos desde las primeras fases del proyecto.
 
@@ -211,6 +218,7 @@ Esta decisión es central para mantener controlado el modelo de datos desde las 
 - `V4__crear_tablas_color.sql`: crea `color` y `seccion_carta_color`. Los colores son relacionales, no columnas numeradas ni texto separado por comas. La migración carga `RED`, `BLUE`, `YELLOW`, `GREEN`, `BLACK`, `PURPLE` y `WHITE`.
 - `V5__crear_tabla_bloque_texto.sql`: crea `bloque_texto`. Cada fila representa una caja oficial completa de texto asociada a una sección, con `contenido_oficial` como fuente de verdad.
 - `V6__crear_tablas_etiqueta_efecto.sql`: crea `etiqueta_efecto` y `bloque_texto_etiqueta`. Las etiquetas de efecto son un catálogo extensible y la relación indica qué etiquetas están presentes en cada bloque sin dividir `contenido_oficial`.
+- `V7__crear_tablas_palabra_clave.sql`: crea `palabra_clave` y `bloque_texto_palabra_clave`. Las palabras clave son un catálogo extensible y la relación indica qué palabras clave propias aparecen directamente en cada bloque.
 
 ### Entidades y enums
 
@@ -225,6 +233,8 @@ Entidades actuales:
 - `BloqueTexto`
 - `EtiquetaEfecto`
 - `BloqueTextoEtiqueta`
+- `PalabraClave`
+- `BloqueTextoPalabraClave`
 
 Enums actuales:
 
@@ -305,6 +315,18 @@ erDiagram
         BIGINT etiqueta_efecto_id FK
     }
 
+    palabra_clave {
+        BIGINT id PK
+        VARCHAR codigo UK
+        VARCHAR nombre_oficial UK
+    }
+
+    bloque_texto_palabra_clave {
+        BIGINT id PK
+        BIGINT bloque_texto_id FK
+        BIGINT palabra_clave_id FK
+    }
+
     carta ||--o{ seccion_carta : contiene
     seccion_carta ||--o{ seccion_carta_rasgo : tiene
     rasgo ||--o{ seccion_carta_rasgo : clasifica
@@ -313,6 +335,8 @@ erDiagram
     seccion_carta ||--o{ bloque_texto : contiene
     bloque_texto ||--o{ bloque_texto_etiqueta : marca
     etiqueta_efecto ||--o{ bloque_texto_etiqueta : clasifica
+    bloque_texto ||--o{ bloque_texto_palabra_clave : posee
+    palabra_clave ||--o{ bloque_texto_palabra_clave : clasifica
 ```
 
 ## Decisiones principales del modelo
@@ -331,6 +355,7 @@ erDiagram
 - `CategoriaBloqueTexto.EFFECT` representa la caja normal de efectos. No se llama `MAIN` porque `[Main]` es una etiqueta oficial de activación que se modelará aparte.
 - Cada `BloqueTexto` guarda una caja oficial completa. `bloque_texto_etiqueta` permite indicar presencia de etiquetas dentro del bloque, sin dividir inicialmente cada frase o efecto individual.
 - Las etiquetas de efecto son un catálogo extensible en `etiqueta_efecto`, no un enum. La tabla todavía no contiene datos iniciales.
+- Las palabras clave tienen estructura relacional mediante `palabra_clave` y `bloque_texto_palabra_clave`, pero el catálogo inicial y la importación de relaciones siguen pendientes.
 
 ## Fuente de datos prevista
 
@@ -358,13 +383,14 @@ Planificado, pero no implementado todavía:
 
 - Importador desde Heroicc API / Bulk Data.
 - Carga de una muestra curada y posterior importación completa del catálogo.
-- Modelo de impresiones y lanzamientos para imágenes, artes alternativos, reimpresiones, productos y fechas.
+- Modelo de impresiones y lanzamientos para imágenes, artes alternativas, reimpresiones, productos y fechas.
 - Evoluciones normales estructuradas.
-- Conservación de evoluciones especiales en texto oficial, con detección posterior mediante etiquetas o búsqueda textual.
+- Conservación de evoluciones especiales en texto oficial, con localización posterior mediante búsqueda textual o patrones oficiales exactos, no mediante etiquetas semánticas inferidas.
 - Link estructurado: requisitos, coste, bonificación de DP, efecto y etiquetas relacionadas.
 - Catálogo inicial de etiquetas de efecto, que se definirá analizando los textos oficiales importados. Podrá incluir códigos normalizados como `MAIN`, `DELAY`, `ON_PLAY`, `WHEN_DIGIVOLVING`, `WHEN_ATTACKING`, `ALL_TURNS` u `ON_DELETION`.
 - Extracción o detección automática de etiquetas desde los textos importados de Heroicc.
-- Palabras clave propias como datos estructurados y palabras clave mencionadas o concedidas mediante búsqueda de texto.
+- Población del catálogo inicial de palabras clave, detección/importación de palabras clave propias y uso de esas relaciones en filtros.
+- Localización textual de palabras clave mencionadas, concedidas, eliminadas, negadas o usadas como condición.
 - Restricciones completas, pares prohibidos y erratas.
 - API REST para consulta de cartas.
 - Frontend Angular para búsqueda avanzada.
@@ -376,7 +402,7 @@ Filtros previstos para la búsqueda avanzada:
 - Uno o varios rasgos.
 - Uno o varios colores, con modos "contiene todos", "contiene cualquiera" o "exactamente esta combinación".
 - Categoría del bloque de texto y uso de etiquetas de activación en filtros.
-- Palabras clave propias, mencionadas o concedidas.
+- Palabras clave propias mediante relación estructurada, y menciones o concesiones mediante búsqueda textual.
 - Evolución normal y detección textual de evoluciones especiales.
 - Disponibilidad, restricciones o productos cuando existan esas tablas.
 

@@ -10,6 +10,17 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
+/**
+ * Relación entre una sección de carta y uno de sus rasgos.
+ *
+ * <p>Se corresponde con la tabla MySQL {@code seccion_carta_rasgo}. Permite
+ * que una {@link SeccionCarta} tenga cualquier cantidad de rasgos reutilizando
+ * filas del catálogo {@link Rasgo}. La tabla evita duplicar el mismo rasgo en
+ * una sección y conserva el orden oficial.</p>
+ *
+ * <p>Se usará para filtros relacionales por rasgos, incluyendo cartas que
+ * deban contener todos, alguno o una combinación concreta de rasgos.</p>
+ */
 @Entity
 @Table(name = "seccion_carta_rasgo")
 public class SeccionCartaRasgo {
@@ -26,6 +37,9 @@ public class SeccionCartaRasgo {
     @JoinColumn(name = "rasgo_id", nullable = false)
     private Rasgo rasgo;
 
+    /**
+     * Posición del rasgo dentro de la lista oficial de la sección.
+     */
     @Column(name = "orden", nullable = false)
     private Integer orden;
 

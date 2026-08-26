@@ -2,6 +2,17 @@ package com.jotilla.paginatcg.entity;
 
 import jakarta.persistence.*;
 
+/**
+ * Relación entre un bloque de texto y una etiqueta de efecto presente en él.
+ *
+ * <p>Se corresponde con la tabla MySQL {@code bloque_texto_etiqueta}. La fila
+ * no representa una frase concreta ni una ocurrencia contada; solo indica que
+ * la etiqueta existe al menos una vez dentro del {@link BloqueTexto} completo.</p>
+ *
+ * <p>No almacena la posición exacta ni el número de apariciones. Se usará para
+ * filtros que combinen categoría de bloque y etiquetas oficiales de activación
+ * o temporización, manteniendo {@code contenido_oficial} como fuente de verdad.</p>
+ */
 @Entity
 @Table(
         name = "bloque_texto_etiqueta",
@@ -29,6 +40,9 @@ public class BloqueTextoEtiqueta {
     protected BloqueTextoEtiqueta() {
     }
 
+    /**
+     * Crea la marca de presencia de una etiqueta dentro de un bloque completo.
+     */
     public BloqueTextoEtiqueta(
             BloqueTexto bloqueTexto,
             EtiquetaEfecto etiquetaEfecto
