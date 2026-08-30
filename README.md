@@ -18,8 +18,8 @@ Implementado actualmente:
 - Backend Spring Boot en `backend/`.
 - Configuración de MySQL mediante Docker Compose.
 - Flyway como gestor de migraciones.
-- Migraciones V1 a V8 implementadas y validadas para el modelo inicial de cartas.
-- Entidades JPA para cartas, secciones, formas, rasgos, colores, bloques de texto, etiquetas de efecto, palabras clave y requisitos normales de evolución.
+- Migraciones V1 a V9 implementadas, aplicadas y validadas para el modelo de cartas.
+- Entidades JPA para el contenido funcional de las cartas, sus requisitos de evolución, idiomas, impresiones, lanzamientos e ilustradores.
 - `CartaRepository`, basado en `JpaRepository<Carta, Long>`.
 - Búsqueda derivada `findByCodigo(String codigo)`.
 - Tests de integración básicos con Spring Boot y MySQL real.
@@ -33,7 +33,7 @@ No implementado todavía:
 - Controladores REST o endpoints de cartas.
 - Frontend Angular funcional. Existe una carpeta `frontend/`, pero actualmente no contiene una implementación.
 - Autenticación, usuarios, colecciones personales o mazos.
-- Impresiones, lanzamientos, Link estructurado, restricciones completas o erratas completas.
+- Link estructurado, restricciones completas o erratas completas.
 
 ## Objetivos y alcance
 
@@ -204,7 +204,7 @@ Esto implica:
 - Hibernate solo valida que las entidades coincidan con el esquema de MySQL.
 - Hibernate no debe crear ni alterar automáticamente el esquema.
 - Una migración aplicada no se edita.
-- Los cambios posteriores se hacen con nuevas migraciones, por ejemplo `V9`, `V10`, etc.
+- Los cambios posteriores se hacen con nuevas migraciones, por ejemplo `V10`, `V11`, etc.
 
 Esta decisión es central para mantener controlado el modelo de datos desde las primeras fases del proyecto.
 
@@ -220,6 +220,7 @@ Esta decisión es central para mantener controlado el modelo de datos desde las 
 - `V6__crear_tablas_etiqueta_efecto.sql`: crea `etiqueta_efecto` y `bloque_texto_etiqueta`. Las etiquetas de efecto son un catálogo extensible y la relación indica qué etiquetas están presentes en cada bloque sin dividir `contenido_oficial`.
 - `V7__crear_tablas_palabra_clave.sql`: crea `palabra_clave` y `bloque_texto_palabra_clave`. Las palabras clave son un catálogo extensible y la relación indica qué palabras clave propias aparecen directamente en cada bloque.
 - `V8__crear_formas_y_requisitos_evolucion_normal.sql`: crea el catálogo extensible `forma_carta`, sustituye el texto de forma de `seccion_carta` por `forma_carta_id` y crea `requisito_evolucion_normal` y `requisito_evolucion_normal_color` para representar alternativas normales de evolución.
+- `V9__crear_impresiones_y_lanzamientos.sql`: crea `idioma`, `lanzamiento`, `impresion_carta`, `impresion_carta_lanzamiento`, `ilustrador` e `impresion_carta_ilustrador` para separar la identidad funcional de una carta de sus variantes físicas o gráficas.
 
 ### Entidades y enums
 
@@ -239,6 +240,12 @@ Entidades actuales:
 - `BloqueTextoPalabraClave`
 - `RequisitoEvolucionNormal`
 - `RequisitoEvolucionNormalColor`
+- `Idioma`
+- `Lanzamiento`
+- `ImpresionCarta`
+- `ImpresionCartaLanzamiento`
+- `Ilustrador`
+- `ImpresionCartaIlustrador`
 
 Enums actuales:
 
@@ -355,6 +362,50 @@ erDiagram
         INT orden
     }
 
+    idioma {
+        BIGINT id PK
+        VARCHAR codigo UK
+        VARCHAR nombre
+    }
+
+    lanzamiento {
+        BIGINT id PK
+        BIGINT idioma_id FK
+        VARCHAR codigo
+        VARCHAR nombre
+        VARCHAR genero
+        DATE fecha
+    }
+
+    impresion_carta {
+        BIGINT id PK
+        BIGINT carta_id FK
+        BIGINT idioma_id FK
+        INT numero_variante
+        VARCHAR url_imagen
+        TEXT notas
+        INT estrellas
+        VARCHAR sello
+    }
+
+    impresion_carta_lanzamiento {
+        BIGINT id PK
+        BIGINT impresion_carta_id FK
+        BIGINT lanzamiento_id FK
+    }
+
+    ilustrador {
+        BIGINT id PK
+        VARCHAR nombre_credito UK
+    }
+
+    impresion_carta_ilustrador {
+        BIGINT id PK
+        BIGINT impresion_carta_id FK
+        BIGINT ilustrador_id FK
+        INT orden
+    }
+
     carta ||--o{ seccion_carta : contiene
     forma_carta o|--o{ seccion_carta : forma_propia
     seccion_carta ||--o{ seccion_carta_rasgo : tiene
@@ -370,6 +421,13 @@ erDiagram
     forma_carta o|--o{ requisito_evolucion_normal : forma_de_origen
     requisito_evolucion_normal ||--o{ requisito_evolucion_normal_color : admite
     color ||--o{ requisito_evolucion_normal_color : color_de_evolucion
+    idioma ||--o{ lanzamiento : publica
+    carta ||--o{ impresion_carta : tiene_variantes
+    idioma ||--o{ impresion_carta : identifica_idioma
+    impresion_carta ||--o{ impresion_carta_lanzamiento : aparece_en
+    lanzamiento ||--o{ impresion_carta_lanzamiento : incluye
+    impresion_carta ||--o{ impresion_carta_ilustrador : acredita
+    ilustrador ||--o{ impresion_carta_ilustrador : recibe_credito
 ```
 
 ## Decisiones principales del modelo
@@ -396,6 +454,12 @@ erDiagram
 - El coste de evolución es obligatorio y puede ser `0`. Los colores concretos del requisito se relacionan mediante `requisito_evolucion_normal_color`, independientemente de los colores propios de la sección almacenados en `seccion_carta_color`.
 - `cualquier_color = true` expresa cualquier color y excluye relaciones con colores concretos. Con `cualquier_color = false`, la ausencia de esas relaciones significa que el requisito no exige color.
 - Las evoluciones especiales por nombre, rasgo, ADN, Burst, Blast, App Fusion u otras condiciones escritas permanecen en `BloqueTexto.contenidoOficial`; se localizarán mediante búsqueda textual o patrones oficiales exactos, sin convertirlas en requisitos normales ni etiquetas semánticas inferidas.
+- `Carta` representa la identidad funcional única asociada a un código oficial. `ImpresionCarta` representa cada variante física o gráfica de esa identidad.
+- En cada idioma, `numero_variante = 0` identifica la impresión base; los valores superiores diferencian artes alternativas o reimpresiones. La combinación de carta, idioma y número de variante es única.
+- El frontend podrá mostrar solo la impresión base o todas las variantes. Una futura colección o mazo podrá señalar la `ImpresionCarta` concreta que posee o utiliza el usuario.
+- `Idioma` es un catálogo extensible que actualmente contiene `EN`, `JA`, `KO` y `ZH_HANS`. El contenido funcional canónico y buscable permanece en inglés; otros idiomas añaden impresiones relacionadas con la misma `Carta`, sin duplicar secciones, efectos ni requisitos.
+- `Lanzamiento` representa productos, promociones, torneos u otras publicaciones y puede no tener una fecha única conocida. Una impresión puede aparecer en varios lanzamientos.
+- `Ilustrador` cataloga los nombres de crédito. Una impresión puede tener cero, uno o varios ilustradores y `impresion_carta_ilustrador.orden` conserva el orden del crédito.
 
 ## Fuente de datos prevista
 
@@ -415,7 +479,8 @@ Tratamiento previsto de algunos campos:
 - Como protección, valores visuales como `"-"` se tratarán como ausencia si apareciesen en alguna fuente futura.
 - `type` se dividirá por `/` para obtener rasgos reutilizables.
 - `color` se relacionará con el catálogo `color`.
-- El idioma inicial de importación será inglés.
+- Inicialmente solo se importarán impresiones en inglés. Las impresiones de otros idiomas se relacionarán con la misma `Carta` y no duplicarán su contenido funcional.
+- Heroicc no documenta actualmente el ilustrador como campo; esos créditos necesitarán otra fuente o una extracción posterior desde la imagen.
 
 ## Roadmap
 
@@ -423,7 +488,8 @@ Planificado, pero no implementado todavía:
 
 - Importador desde Heroicc API / Bulk Data.
 - Carga de una muestra curada y posterior importación completa del catálogo.
-- Modelo de impresiones y lanzamientos para imágenes, artes alternativas, reimpresiones, productos y fechas.
+- Importación de impresiones y lanzamientos, inicialmente en inglés.
+- Obtención e importación posterior de los créditos de ilustración desde otra fuente o desde las imágenes.
 - Importación y validación de los requisitos normales de evolución desde la fuente de datos.
 - Conservación de evoluciones especiales en texto oficial, con localización posterior mediante búsqueda textual o patrones oficiales exactos, no mediante etiquetas semánticas inferidas.
 - Link estructurado: requisitos, coste, bonificación de DP, efecto y etiquetas relacionadas.

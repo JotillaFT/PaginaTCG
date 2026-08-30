@@ -12,7 +12,7 @@ spring.jpa.hibernate.ddl-auto=validate
 
 Esto significa que Hibernate valida que las entidades coincidan con el esquema, pero no crea, modifica ni elimina tablas. Las migraciones ya aplicadas son inmutables: no se editan para cambiar formato, comentarios, restricciones o sentencias, porque eso alteraría el checksum de Flyway.
 
-El estado actual llega hasta `V8__crear_formas_y_requisitos_evolucion_normal.sql`. Las migraciones V1 a V8 están aplicadas y validadas y no deben modificarse. El siguiente cambio de esquema deberá comenzar en `V9` o en la siguiente versión que corresponda según el estado real del repositorio.
+El estado actual llega hasta `V9__crear_impresiones_y_lanzamientos.sql`. Las migraciones V1 a V9 están implementadas, aplicadas y validadas y no deben modificarse. El siguiente cambio de esquema deberá comenzar en `V10` o en la siguiente versión que corresponda según el estado real del repositorio.
 
 ## Migraciones
 
@@ -335,9 +335,69 @@ Entidades Java relacionadas:
 - `RequisitoEvolucionNormalColor`
 - `ColorCarta`
 
+### V9__crear_impresiones_y_lanzamientos.sql
+
+Separa la identidad funcional de una carta de sus variantes físicas o gráficas y de los productos en los que se publican.
+
+Tablas creadas:
+
+- `idioma`
+- `lanzamiento`
+- `impresion_carta`
+- `impresion_carta_lanzamiento`
+- `ilustrador`
+- `impresion_carta_ilustrador`
+
+Catálogo `idioma`:
+
+- Es un catálogo extensible con `id`, `codigo` y `nombre`, no un enum.
+- V9 inserta `EN`, `JA`, `KO` y `ZH_HANS`.
+- El idioma pertenece a impresiones y lanzamientos; no duplica el contenido funcional de `Carta`.
+
+Impresiones:
+
+- `Carta` conserva la identidad funcional única por código oficial.
+- Cada fila de `impresion_carta` representa una variante física o gráfica de una `Carta` en un idioma.
+- `numero_variante = 0` identifica la impresión base dentro de ese idioma.
+- Los valores de `numero_variante` superiores a cero diferencian artes alternativas o reimpresiones.
+- La restricción `uk_impresion_carta_carta_idioma_variante` hace única la combinación `(carta_id, idioma_id, numero_variante)`.
+- `url_imagen`, `notas`, `estrellas` y `sello` son datos opcionales propios de la impresión.
+- El frontend podrá consultar solo la impresión base o mostrar todas las variantes disponibles.
+- Una futura colección o mazo podrá referenciar la `ImpresionCarta` concreta que posee o utiliza el usuario.
+
+Lanzamientos:
+
+- `lanzamiento` representa un producto, promoción, torneo u otra publicación dentro de un idioma.
+- Su código es único dentro de cada idioma y `fecha` es nullable porque algunos grupos de promociones o eventos no tienen una única fecha conocida.
+- Puede conservar URLs del producto, lista de cartas, imagen y miniatura cuando estén disponibles.
+- `impresion_carta_lanzamiento` permite que una misma impresión esté relacionada con varios lanzamientos sin duplicar la impresión.
+
+Ilustradores:
+
+- `ilustrador` es un catálogo reutilizable por `nombre_credito`.
+- Una impresión puede no tener ilustradores registrados o relacionarse con uno o varios.
+- `impresion_carta_ilustrador.orden` conserva la posición oficial de cada nombre dentro del crédito.
+- No pueden repetirse el mismo ilustrador ni la misma posición dentro de una impresión.
+
+Claves foráneas y `ON DELETE` principales:
+
+- `lanzamiento.idioma_id` e `impresion_carta.idioma_id` referencian `idioma(id)` con `ON DELETE RESTRICT`.
+- `impresion_carta.carta_id` referencia `carta(id)` con `ON DELETE CASCADE`.
+- Las tablas relacionales eliminan sus filas con `ON DELETE CASCADE` cuando se elimina la impresión.
+- Las referencias desde las tablas relacionales hacia `lanzamiento` e `ilustrador` usan `ON DELETE RESTRICT`.
+
+Entidades Java relacionadas:
+
+- `Idioma`
+- `Lanzamiento`
+- `ImpresionCarta`
+- `ImpresionCartaLanzamiento`
+- `Ilustrador`
+- `ImpresionCartaIlustrador`
+
 ## Decisiones del dominio
 
-`Carta` representa la identidad lógica común de una carta: código oficial, nombre general, categoría, rareza base, icono de bloque y límite de copias. `SeccionCarta` representa cada parte funcional de esa carta. Una carta normal suele tener una sección; una carta `DUAL` puede tener varias secciones, cada una con su categoría concreta.
+`Carta` representa la identidad funcional única de una carta por código oficial: nombre general, categoría, rareza base, icono de bloque y límite de copias. `SeccionCarta` representa cada parte funcional de esa carta. Una carta normal suele tener una sección; una carta `DUAL` puede tener varias secciones, cada una con su categoría concreta.
 
 Como cada `BloqueTexto` pertenece a una `SeccionCarta`, los datos asociados a un bloque no deben atribuirse indiscriminadamente a todas las secciones de la carta.
 
@@ -362,6 +422,16 @@ Los enums se reservan para conjuntos cerrados y controlados, como `CategoriaCart
 Cada fila de `requisito_evolucion_normal` es una alternativa oficial completa. `categoria_origen`, `nivel_origen`, `forma_origen_id`, los colores relacionados y `coste` forman conjuntamente su condición; no son alternativas independientes entre sí. `categoria_origen` solo se utiliza cuando la categoría aparece de forma explícita y no se infiere a partir del nivel.
 
 El modelo diferencia los colores propios de una sección, almacenados mediante `seccion_carta_color`, de los colores admitidos por un requisito, almacenados mediante `requisito_evolucion_normal_color`. `cualquier_color = true` representa de forma explícita que cualquier color es válido. Con `cualquier_color = false`, la ausencia de colores relacionados indica que el requisito no exige color.
+
+### Identidad funcional e impresiones
+
+`ImpresionCarta` representa una variante física o gráfica de una `Carta`. La combinación `(carta_id, idioma_id, numero_variante)` es única: la variante `0` es la impresión base en ese idioma y los números superiores identifican artes alternativas o reimpresiones diferenciadas.
+
+El contenido funcional canónico y buscable permanece en inglés. Inicialmente solo se importarán impresiones inglesas. Las impresiones japonesas, coreanas o chinas se relacionarán en el futuro con la misma `Carta`; no crearán copias de sus secciones, efectos, rasgos, colores ni requisitos de evolución. Los idiomas adicionales afectan a las impresiones y lanzamientos, no representan traducciones del modelo funcional.
+
+Una impresión puede aparecer en varios lanzamientos mediante `impresion_carta_lanzamiento`. También puede tener cero, uno o varios ilustradores mediante `impresion_carta_ilustrador`, cuyo `orden` conserva la secuencia del crédito. Heroicc no ofrece actualmente el ilustrador como campo documentado, por lo que su futura importación requerirá otra fuente o una extracción posterior desde la imagen.
+
+El frontend podrá elegir entre mostrar únicamente la impresión base o todas las variantes. Las futuras colecciones y mazos podrán relacionarse con la impresión concreta elegida por el usuario sin modificar la identidad funcional de `Carta`.
 
 ### Criterios de interpretación del texto oficial
 
@@ -523,6 +593,50 @@ erDiagram
         INT orden
     }
 
+    idioma {
+        BIGINT id PK
+        VARCHAR codigo UK
+        VARCHAR nombre
+    }
+
+    lanzamiento {
+        BIGINT id PK
+        BIGINT idioma_id FK
+        VARCHAR codigo
+        VARCHAR nombre
+        VARCHAR genero
+        DATE fecha
+    }
+
+    impresion_carta {
+        BIGINT id PK
+        BIGINT carta_id FK
+        BIGINT idioma_id FK
+        INT numero_variante
+        VARCHAR url_imagen
+        TEXT notas
+        INT estrellas
+        VARCHAR sello
+    }
+
+    impresion_carta_lanzamiento {
+        BIGINT id PK
+        BIGINT impresion_carta_id FK
+        BIGINT lanzamiento_id FK
+    }
+
+    ilustrador {
+        BIGINT id PK
+        VARCHAR nombre_credito UK
+    }
+
+    impresion_carta_ilustrador {
+        BIGINT id PK
+        BIGINT impresion_carta_id FK
+        BIGINT ilustrador_id FK
+        INT orden
+    }
+
     carta ||--o{ seccion_carta : contiene
     forma_carta o|--o{ seccion_carta : forma_propia
     seccion_carta ||--o{ seccion_carta_rasgo : tiene
@@ -538,4 +652,11 @@ erDiagram
     forma_carta o|--o{ requisito_evolucion_normal : forma_de_origen
     requisito_evolucion_normal ||--o{ requisito_evolucion_normal_color : admite
     color ||--o{ requisito_evolucion_normal_color : color_de_evolucion
+    idioma ||--o{ lanzamiento : publica
+    carta ||--o{ impresion_carta : tiene_variantes
+    idioma ||--o{ impresion_carta : identifica_idioma
+    impresion_carta ||--o{ impresion_carta_lanzamiento : aparece_en
+    lanzamiento ||--o{ impresion_carta_lanzamiento : incluye
+    impresion_carta ||--o{ impresion_carta_ilustrador : acredita
+    ilustrador ||--o{ impresion_carta_ilustrador : recibe_credito
 ```

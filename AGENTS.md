@@ -25,7 +25,7 @@
 - Backend confirmado: Spring Boot 4.1.1, Java 25, Gradle 9.5.1 y MySQL 8.4 en Docker.
 - Puertos actuales: backend `8080` y MySQL del host `3307`.
 - Flyway y Hibernate deben validar el esquema; la aplicación no debe modificarlo automáticamente. Mantén el modo de Hibernate equivalente a `validate`.
-- La base aplicada y validada actualmente llega de V1 a V8. `V8__crear_formas_y_requisitos_evolucion_normal.sql` ya está aplicada y no debe modificarse, ni siquiera en formato, espacios, comentarios o salto de línea final. Para cambiar el modelo, crea una migración nueva desde V9 o desde el siguiente número disponible tras verificar el directorio real.
+- La base implementada, aplicada y validada actualmente llega de V1 a V9. `V9__crear_impresiones_y_lanzamientos.sql` ya está aplicada y no debe modificarse, ni siquiera en formato, espacios, comentarios o salto de línea final. Las migraciones anteriores también son inmutables. Para cambiar el modelo, crea una migración nueva desde V10 o desde el siguiente número disponible tras verificar el directorio real.
 - En Windows, los tests del backend han funcionado usando `GRADLE_USER_HOME=C:\GradleHome`.
 - No trates los avisos de conversión entre LF y CRLF como errores funcionales. Aun así, `git diff --check` debe terminar sin errores reales de espacios o marcadores.
 
@@ -43,10 +43,21 @@
 
 ### Carta y secciones
 
-- `Carta` representa la identidad lógica común. Su `id` es interno de MySQL y `codigo` es el número oficial visible, por ejemplo `BT5-086`.
+- `Carta` representa la identidad funcional única por código oficial. Su `id` es interno de MySQL y `codigo` es el número visible, por ejemplo `BT5-086`.
 - `SeccionCarta` representa una parte funcional de la carta. Una carta normal suele tener una sección; una carta DUAL puede tener varias.
 - Los datos asociados a un bloque pertenecen a su sección y no deben atribuirse automáticamente a todas las secciones de una `Carta`.
 - `limiteCopiasRegla` representa el límite propio de construcción impreso o asociado a la carta, habitualmente 4. No representa automáticamente la lista externa de restricciones, baneos ni pares prohibidos; eso se modelará por separado.
+
+### Impresiones, idiomas, lanzamientos e ilustradores
+
+- `ImpresionCarta` representa cada variante física o gráfica de una `Carta`; no duplica su identidad funcional, secciones, efectos ni requisitos.
+- La combinación `carta + idioma + numeroVariante` es única. `numeroVariante = 0` representa la impresión base dentro de un idioma y los valores superiores distinguen artes alternativas o reimpresiones.
+- `Idioma` es un catálogo extensible con `EN`, `JA`, `KO` y `ZH_HANS`. El contenido funcional canónico y buscable permanece en inglés; inicialmente solo se importarán impresiones inglesas.
+- Las impresiones de otros idiomas deben relacionarse con la misma `Carta`, sin crear traducciones o duplicados del modelo funcional.
+- `Lanzamiento` representa productos, promociones, torneos u otras publicaciones y su fecha puede ser `null`. Una impresión puede relacionarse con varios lanzamientos.
+- `Ilustrador` cataloga el nombre de crédito. Una impresión puede tener cero, uno o varios ilustradores y `ImpresionCartaIlustrador.orden` conserva el orden oficial del crédito.
+- Heroicc no documenta actualmente el ilustrador como campo; su importación necesitará otra fuente o una extracción posterior desde la imagen.
+- El frontend podrá mostrar solo la impresión base o todas las variantes. Las futuras colecciones y mazos podrán señalar la `ImpresionCarta` concreta que posee o utiliza el usuario.
 
 ### Forma, atributo, rasgos y colores
 
