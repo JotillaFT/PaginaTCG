@@ -18,8 +18,8 @@ Implementado actualmente:
 - Backend Spring Boot en `backend/`.
 - Configuración de MySQL mediante Docker Compose.
 - Flyway como gestor de migraciones.
-- Migraciones V1 a V10 implementadas, aplicadas y validadas para el modelo de cartas.
-- Entidades JPA para el contenido funcional de las cartas, sus requisitos de evolución, Link, idiomas, impresiones, lanzamientos e ilustradores.
+- Migraciones V1 a V11 implementadas, aplicadas y validadas para el modelo de cartas.
+- Entidades JPA para el contenido funcional de las cartas, sus requisitos de evolución, Link, idiomas, impresiones, lanzamientos, ilustradores y restricciones competitivas.
 - `CartaRepository`, basado en `JpaRepository<Carta, Long>`.
 - Búsqueda derivada `findByCodigo(String codigo)`.
 - Tests de integración básicos con Spring Boot y MySQL real.
@@ -33,7 +33,7 @@ No implementado todavía:
 - Controladores REST o endpoints de cartas.
 - Frontend Angular funcional. Existe una carpeta `frontend/`, pero actualmente no contiene una implementación.
 - Autenticación, usuarios, colecciones personales o mazos.
-- Restricciones completas o erratas completas.
+- Datos reales de restricciones competitivas o erratas completas.
 
 ## Objetivos y alcance
 
@@ -204,7 +204,7 @@ Esto implica:
 - Hibernate solo valida que las entidades coincidan con el esquema de MySQL.
 - Hibernate no debe crear ni alterar automáticamente el esquema.
 - Una migración aplicada no se edita.
-- Los cambios posteriores se hacen con nuevas migraciones, por ejemplo `V11`, `V12`, etc.
+- Los cambios posteriores se hacen con nuevas migraciones, por ejemplo `V12`, `V13`, etc.
 
 Esta decisión es central para mantener controlado el modelo de datos desde las primeras fases del proyecto.
 
@@ -222,6 +222,7 @@ Esta decisión es central para mantener controlado el modelo de datos desde las 
 - `V8__crear_formas_y_requisitos_evolucion_normal.sql`: crea el catálogo extensible `forma_carta`, sustituye el texto de forma de `seccion_carta` por `forma_carta_id` y crea `requisito_evolucion_normal` y `requisito_evolucion_normal_color` para representar alternativas normales de evolución.
 - `V9__crear_impresiones_y_lanzamientos.sql`: crea `idioma`, `lanzamiento`, `impresion_carta`, `impresion_carta_lanzamiento`, `ilustrador` e `impresion_carta_ilustrador` para separar la identidad funcional de una carta de sus variantes físicas o gráficas.
 - `V10__crear_informacion_link.sql`: crea `informacion_link`, `requisito_link` y `requisito_link_rasgo` para separar la estructura de la mecánica Link, sus requisitos y los efectos funcionales conservados en `bloque_texto`.
+- `V11__crear_restricciones_competitivas.sql`: crea el catálogo `tipo_restriccion_competitiva`, las restricciones individuales de `restriccion_competitiva_carta` y los pares prohibidos de `restriccion_pareja`.
 
 ### Entidades y enums
 
@@ -250,6 +251,9 @@ Entidades actuales:
 - `InformacionLink`
 - `RequisitoLink`
 - `RequisitoLinkRasgo`
+- `TipoRestriccionCompetitiva`
+- `RestriccionCompetitivaCarta`
+- `RestriccionPareja`
 
 Enums actuales:
 
@@ -432,6 +436,31 @@ erDiagram
         INT orden
     }
 
+    tipo_restriccion_competitiva {
+        BIGINT id PK
+        VARCHAR codigo UK
+        VARCHAR nombre_oficial UK
+    }
+
+    restriccion_competitiva_carta {
+        BIGINT id PK
+        BIGINT carta_id FK
+        BIGINT tipo_restriccion_competitiva_id FK
+        INT maximo_copias
+        DATE fecha_inicio
+        DATE fecha_fin
+        TEXT nota
+    }
+
+    restriccion_pareja {
+        BIGINT id PK
+        BIGINT carta_a_id FK
+        BIGINT carta_b_id FK
+        DATE fecha_inicio
+        DATE fecha_fin
+        TEXT nota
+    }
+
     carta ||--o{ seccion_carta : contiene
     forma_carta o|--o{ seccion_carta : forma_propia
     seccion_carta ||--o{ seccion_carta_rasgo : tiene
@@ -458,6 +487,10 @@ erDiagram
     informacion_link ||--o{ requisito_link : define
     requisito_link ||--o{ requisito_link_rasgo : admite
     rasgo ||--o{ requisito_link_rasgo : requisito_de_rasgo
+    carta ||--o{ restriccion_competitiva_carta : recibe
+    tipo_restriccion_competitiva ||--o{ restriccion_competitiva_carta : clasifica
+    carta ||--o{ restriccion_pareja : carta_a
+    carta ||--o{ restriccion_pareja : carta_b
 ```
 
 ## Decisiones principales del modelo
@@ -495,6 +528,14 @@ erDiagram
 - Una `InformacionLink` puede tener varios `RequisitoLink`. Cada fila es una alternativa oficial completa y conserva su `orden`, `coste` y `contenido_oficial`.
 - `RequisitoLinkRasgo` relaciona uno o varios rasgos admitidos con un requisito y conserva su orden oficial. Estos rasgos son condiciones del requisito, independientes de los rasgos propios de `SeccionCarta`.
 - Las relaciones Java de V10 usan carga `LAZY` y no añaden cascadas JPA, `orphanRemoval` ni relaciones bidireccionales innecesarias. Los comportamientos `ON DELETE` siguen definidos por Flyway y MySQL.
+- `Carta.limiteCopiasRegla` representa el límite intrínseco de construcción de la propia carta, normalmente `4`; una regla impresa puede establecer otro valor.
+- `RestriccionCompetitivaCarta` representa una limitación competitiva externa impuesta por Bandai al código funcional de una `Carta`, por lo que afecta a todas sus impresiones y no se relaciona con `ImpresionCarta`.
+- `TipoRestriccionCompetitiva` es un catálogo extensible, no un enum. V11 carga inicialmente `BAN` y `RESTRICT`, sin asumir que sean los únicos tipos posibles en el futuro.
+- Una restricción individual conserva el tipo oficial, `maximo_copias`, el inicio de vigencia, un final nullable y una nota opcional. `BAN` usa `maximo_copias = 0`; `RESTRICT` conserva el máximo real permitido, habitualmente `1` en los casos actuales.
+- `fecha_inicio` es el primer día de vigencia y `fecha_fin` es el primer día en que la restricción deja de estar vigente. Mientras continúe activa, `fecha_fin` permanece `NULL`; no se guarda una fecha de anuncio ni un tipo `UNRESTRICT`.
+- El histórico se conserva mediante filas para periodos distintos. La coherencia entre tipo y máximo y los posibles solapamientos se validarán en el futuro importador o capa de escritura, sin triggers SQL.
+- `RestriccionPareja` representa dos códigos que no pueden usarse simultáneamente en un mazo, sin reducir necesariamente su máximo individual. `carta_a_id < carta_b_id` impide autorrelaciones y mantiene una representación canónica del par.
+- Las relaciones Java de V11 usan carga `LAZY` y no añaden cascadas JPA, `orphanRemoval` ni relaciones bidireccionales innecesarias. Los comportamientos `ON DELETE` siguen definidos por Flyway y MySQL.
 
 ## Fuente de datos prevista
 
@@ -517,6 +558,7 @@ Tratamiento previsto de algunos campos:
 - Inicialmente solo se importarán impresiones en inglés. Las impresiones de otros idiomas se relacionarán con la misma `Carta` y no duplicarán su contenido funcional.
 - Heroicc no documenta actualmente el ilustrador como campo; esos créditos necesitarán otra fuente o una extracción posterior desde la imagen.
 - La estructura Link ya existe, pero la importación de bonificaciones, requisitos, costes y rasgos admitidos desde la fuente externa sigue pendiente.
+- La estructura de restricciones competitivas ya existe, pero la importación de periodos reales, límites y pares prohibidos desde la fuente externa sigue pendiente.
 
 ## Roadmap
 
@@ -533,7 +575,8 @@ Planificado, pero no implementado todavía:
 - Extracción o detección automática de etiquetas desde los textos importados de Heroicc.
 - Población del catálogo inicial de palabras clave, detección/importación de palabras clave propias y uso de esas relaciones en filtros.
 - Localización textual de palabras clave mencionadas, concedidas, eliminadas, negadas o usadas como condición.
-- Restricciones completas, pares prohibidos y erratas.
+- Importación y validación de restricciones competitivas individuales y pares prohibidos desde la fuente externa.
+- Erratas y texto corregido.
 - API REST para consulta de cartas.
 - Frontend Angular para búsqueda avanzada.
 - Usuarios, colecciones personales y mazos como módulos posteriores.
@@ -546,7 +589,7 @@ Filtros previstos para la búsqueda avanzada:
 - Categoría del bloque de texto y uso de etiquetas de activación en filtros.
 - Palabras clave propias mediante relación estructurada, y menciones o concesiones mediante búsqueda textual.
 - Evolución normal y detección textual de evoluciones especiales.
-- Disponibilidad, restricciones o productos cuando existan esas tablas.
+- Disponibilidad, restricciones competitivas o productos cuando existan los datos necesarios.
 
 ## Atribución y no afiliación
 

@@ -25,7 +25,7 @@
 - Backend confirmado: Spring Boot 4.1.1, Java 25, Gradle 9.5.1 y MySQL 8.4 en Docker.
 - Puertos actuales: backend `8080` y MySQL del host `3307`.
 - Flyway y Hibernate deben validar el esquema; la aplicación no debe modificarlo automáticamente. Mantén el modo de Hibernate equivalente a `validate`.
-- La base implementada, aplicada y validada actualmente llega de V1 a V10. `V10__crear_informacion_link.sql` ya está aplicada y no debe modificarse, ni siquiera en formato, espacios, comentarios o salto de línea final. Las migraciones anteriores también son inmutables. Para cambiar el modelo, crea una migración nueva desde V11 o desde el siguiente número disponible tras verificar el directorio real.
+- La base implementada, aplicada y validada actualmente llega de V1 a V11. `V11__crear_restricciones_competitivas.sql` ya está aplicada y no debe modificarse, ni siquiera en formato, espacios, comentarios o salto de línea final. Las migraciones anteriores también son inmutables. Para cambiar el modelo, crea una migración nueva desde V12 o desde el siguiente número disponible tras verificar el directorio real.
 - En Windows, los tests del backend han funcionado usando `GRADLE_USER_HOME=C:\GradleHome`.
 - No trates los avisos de conversión entre LF y CRLF como errores funcionales. Aun así, `git diff --check` debe terminar sin errores reales de espacios o marcadores.
 
@@ -46,7 +46,21 @@
 - `Carta` representa la identidad funcional única por código oficial. Su `id` es interno de MySQL y `codigo` es el número visible, por ejemplo `BT5-086`.
 - `SeccionCarta` representa una parte funcional de la carta. Una carta normal suele tener una sección; una carta DUAL puede tener varias.
 - Los datos asociados a un bloque pertenecen a su sección y no deben atribuirse automáticamente a todas las secciones de una `Carta`.
-- `limiteCopiasRegla` representa el límite propio de construcción impreso o asociado a la carta, habitualmente 4. No representa automáticamente la lista externa de restricciones, baneos ni pares prohibidos; eso se modelará por separado.
+- `limiteCopiasRegla` representa el límite propio de construcción impreso o asociado a la carta, habitualmente 4, aunque la propia regla puede permitir otra cantidad. No representa restricciones competitivas externas, baneos ni pares prohibidos; estos se modelan desde V11 mediante entidades separadas.
+
+### Restricciones competitivas
+
+- `TipoRestriccionCompetitiva` es un catálogo extensible, no un enum. V11 carga inicialmente `BAN` y `RESTRICT`, pero no presupongas que serán los únicos tipos oficiales futuros.
+- `RestriccionCompetitivaCarta` representa una limitación externa impuesta por Bandai a una `Carta`. No se relaciona con `ImpresionCarta`, porque la restricción afecta al código funcional y a todas sus impresiones.
+- El tipo conserva la clase oficial de decisión y `maximoCopias` su consecuencia cuantitativa. Son datos distintos y ambos son obligatorios para una restricción individual.
+- Un baneo usa `BAN` y `maximoCopias = 0`. Una restricción usa `RESTRICT` y conserva el máximo real permitido, normalmente 1 en los casos actuales, aunque el modelo admite otros valores.
+- `fechaInicio` es el primer día de vigencia. `fechaFin` es el primer día en que deja de estar vigente y permanece `null` mientras continúe activa. No se almacena fecha de anuncio.
+- No se modela `UNRESTRICT` como tipo independiente: la retirada de una restricción se representa cerrando su periodo mediante `fechaFin`.
+- El histórico se conserva con múltiples filas para periodos distintos. Las restricciones unique impiden duplicar el mismo inicio, pero la futura capa de escritura o importador debe validar la coherencia entre tipo y máximo y evitar solapamientos. No introduzcas triggers SQL para estas reglas.
+- `RestriccionPareja` representa exclusivamente dos códigos que no pueden utilizarse simultáneamente; no implica reducir el máximo individual de ninguna carta.
+- En `RestriccionPareja`, `cartaA.id < cartaB.id` impide autorrelaciones, establece el orden canónico del par y evita guardar A-B y B-A por separado.
+- Las relaciones Java de V11 usan `FetchType.LAZY` y no incorporan cascadas JPA, `orphanRemoval` ni relaciones bidireccionales innecesarias. Los comportamientos `ON DELETE` pertenecen a Flyway y MySQL.
+- La estructura de restricciones individuales y pares ya está implementada, pero la importación de los datos competitivos reales continúa pendiente. Las erratas no forman parte de V11.
 
 ### Impresiones, idiomas, lanzamientos e ilustradores
 

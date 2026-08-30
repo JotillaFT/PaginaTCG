@@ -12,7 +12,7 @@ spring.jpa.hibernate.ddl-auto=validate
 
 Esto significa que Hibernate valida que las entidades coincidan con el esquema, pero no crea, modifica ni elimina tablas. Las migraciones ya aplicadas son inmutables: no se editan para cambiar formato, comentarios, restricciones o sentencias, porque eso alteraría el checksum de Flyway.
 
-El estado actual llega hasta `V10__crear_informacion_link.sql`. Las migraciones V1 a V10 están implementadas, aplicadas y validadas y no deben modificarse. El siguiente cambio de esquema deberá comenzar en `V11` o en la siguiente versión que corresponda según el estado real del repositorio.
+El estado actual llega hasta `V11__crear_restricciones_competitivas.sql`. Las migraciones V1 a V11 están implementadas, aplicadas y validadas y no deben modificarse. El siguiente cambio de esquema deberá comenzar en `V12` o en la siguiente versión que corresponda según el estado real del repositorio.
 
 ## Migraciones
 
@@ -447,6 +447,56 @@ Entidades Java relacionadas:
 - `BloqueTexto`
 - `CategoriaBloqueTexto`
 
+### V11__crear_restricciones_competitivas.sql
+
+Estructura las restricciones competitivas individuales aplicadas a códigos de carta y los pares de cartas que no pueden utilizarse simultáneamente.
+
+Tablas creadas:
+
+- `tipo_restriccion_competitiva`
+- `restriccion_competitiva_carta`
+- `restriccion_pareja`
+
+Catálogo de tipos:
+
+- `TipoRestriccionCompetitiva` es un catálogo extensible y no un enum.
+- V11 carga inicialmente `BAN` y `RESTRICT`.
+- Estos códigos conservan la clase oficial de decisión, pero no se consideran una lista cerrada: Bandai podría introducir otros tipos en el futuro.
+
+Restricciones individuales:
+
+- Cada `RestriccionCompetitivaCarta` pertenece a una `Carta`, no a una `ImpresionCarta`, porque afecta al código funcional y a todas sus impresiones.
+- `tipo_restriccion_competitiva_id` identifica la clase oficial de restricción y `maximo_copias` conserva su consecuencia cuantitativa; son conceptos relacionados, pero no equivalentes.
+- `maximo_copias` es obligatorio. Un baneo se representa con `BAN` y valor `0`; una restricción conserva el máximo real permitido, normalmente `1` en los casos actuales, aunque el modelo admite otros valores.
+- `fecha_inicio` es el primer día en que la restricción está vigente y es obligatoria.
+- `fecha_fin` es el primer día en que deja de estar vigente; permanece `NULL` mientras continúe activa.
+- `nota` permite conservar información adicional y es opcional.
+- No se almacena la fecha de anuncio ni existe actualmente un tipo `UNRESTRICT`. La retirada se registra cerrando el periodo mediante `fecha_fin`.
+- La restricción `(carta_id, fecha_inicio)` evita duplicar el mismo inicio y permite conservar otros periodos históricos de la misma carta.
+- Cuando existe, `fecha_fin` debe ser posterior a `fecha_inicio`.
+
+Pares prohibidos:
+
+- `RestriccionPareja` representa exclusivamente dos códigos que no pueden utilizarse simultáneamente en un mazo; no reduce por sí misma el límite individual de ninguna carta.
+- `carta_a_id` y `carta_b_id` relacionan directamente dos filas de `Carta`.
+- `carta_a_id < carta_b_id` impide relacionar una carta consigo misma y establece una representación canónica que evita duplicar A-B como B-A.
+- La combinación `(carta_a_id, carta_b_id, fecha_inicio)` evita repetir el mismo inicio de periodo y permite que el mismo par vuelva a estar prohibido en otro periodo.
+- Sus fechas siguen la misma semántica de inicio inclusivo y fin exclusivo que las restricciones individuales.
+
+Validación y persistencia:
+
+- La coherencia semántica entre tipo y máximo, como `BAN` con `0` o `RESTRICT` con un valor mayor que cero, se validará en el futuro importador o capa de escritura.
+- Los posibles solapamientos entre periodos históricos también se validarán fuera del esquema. V11 no introduce triggers SQL para estas reglas.
+- Las relaciones Java usan `FetchType.LAZY` y no incorporan cascadas JPA, `orphanRemoval` ni relaciones bidireccionales innecesarias.
+- Las foreign keys hacia `Carta` usan `ON DELETE CASCADE`; la relación con `tipo_restriccion_competitiva` usa `ON DELETE RESTRICT`. Flyway y MySQL mantienen estos comportamientos.
+
+Entidades Java relacionadas:
+
+- `TipoRestriccionCompetitiva`
+- `RestriccionCompetitivaCarta`
+- `RestriccionPareja`
+- `Carta`
+
 ## Decisiones del dominio
 
 `Carta` representa la identidad funcional única de una carta por código oficial: nombre general, categoría, rareza base, icono de bloque y límite de copias. `SeccionCarta` representa cada parte funcional de esa carta. Una carta normal suele tener una sección; una carta `DUAL` puede tener varias secciones, cada una con su categoría concreta.
@@ -467,7 +517,7 @@ Las etiquetas de efecto indican presencia dentro de un bloque completo, sin divi
 
 Las palabras clave son mecánicas como `<Blocker>`, `<Rush>` o `<Jamming>`. La relación `bloque_texto_palabra_clave` representa solamente palabras clave propias presentadas directamente en un bloque de una sección. No representa una propiedad global de toda `Carta`, porque una carta `DUAL` puede tener secciones diferentes. El catálogo `palabra_clave` también sigue vacío en las migraciones actuales.
 
-`limite_copias_regla` representa el límite propio de construcción asociado a la carta. El valor habitual por defecto es `4`. No almacena automáticamente restricciones externas, baneos o pares prohibidos; esas restricciones se modelarán posteriormente.
+`limite_copias_regla` representa el límite propio de construcción asociado a la carta. El valor habitual por defecto es `4`, aunque una regla intrínseca puede permitir otra cantidad. No almacena restricciones competitivas externas: desde V11, estas se modelan mediante `RestriccionCompetitivaCarta` y `RestriccionPareja`.
 
 Los enums se reservan para conjuntos cerrados y controlados, como `CategoriaCarta` y `CategoriaBloqueTexto`. Los catálogos extensibles, como formas, etiquetas de efecto y palabras clave, se almacenan en tablas.
 
@@ -494,6 +544,16 @@ Los requisitos se modelan aparte. Cada `RequisitoLink` es una alternativa oficia
 Los efectos de la carta, incluidos `When Linking`, `When Attacking`, `On Deletion` u otros que aparezcan visualmente en la zona Link, continúan en `BloqueTexto`. Utilizan `CategoriaBloqueTexto.LINK_EFFECT` cuando la caja oficial corresponde a Link. No existe una relación directa entre `InformacionLink` y `BloqueTexto` porque describen responsabilidades diferentes.
 
 Esta estructura no convierte en requisitos normales otras evoluciones especiales como ADN, Burst, Blast o App Fusion. Esas condiciones siguen conservándose en el texto oficial según las decisiones anteriores.
+
+### Restricciones competitivas e histórico
+
+Las restricciones competitivas se aplican a `Carta`, no a `ImpresionCarta`, porque Bandai restringe el código funcional con independencia del arte, idioma o producto de una impresión. `Carta.limiteCopiasRegla` sigue representando una regla intrínseca de construcción y no debe confundirse con una limitación externa.
+
+El catálogo `TipoRestriccionCompetitiva` conserva la clase oficial de la decisión. `maximoCopias` conserva el límite cuantitativo efectivo y nunca es `NULL`: un baneo usa `0`, mientras que una restricción guarda el máximo concreto permitido. El catálogo comienza con `BAN` y `RESTRICT`, pero permanece abierto a futuros tipos oficiales.
+
+Los periodos conservan histórico. `fechaInicio` marca el primer día de vigencia y `fechaFin`, cuando existe, el primer día sin vigencia. No se almacena la fecha de anuncio ni un evento `UNRESTRICT`; finalizar una restricción consiste en cerrar su periodo. La futura capa de escritura comprobará la correspondencia entre tipo y máximo y evitará solapamientos.
+
+Los pares prohibidos se modelan aparte porque expresan incompatibilidad entre dos códigos, no una reducción de copias individuales. El orden canónico de sus dos referencias impide guardar el mismo par en ambas direcciones.
 
 ### Criterios de interpretación del texto oficial
 
@@ -721,6 +781,31 @@ erDiagram
         INT orden
     }
 
+    tipo_restriccion_competitiva {
+        BIGINT id PK
+        VARCHAR codigo UK
+        VARCHAR nombre_oficial UK
+    }
+
+    restriccion_competitiva_carta {
+        BIGINT id PK
+        BIGINT carta_id FK
+        BIGINT tipo_restriccion_competitiva_id FK
+        INT maximo_copias
+        DATE fecha_inicio
+        DATE fecha_fin
+        TEXT nota
+    }
+
+    restriccion_pareja {
+        BIGINT id PK
+        BIGINT carta_a_id FK
+        BIGINT carta_b_id FK
+        DATE fecha_inicio
+        DATE fecha_fin
+        TEXT nota
+    }
+
     carta ||--o{ seccion_carta : contiene
     forma_carta o|--o{ seccion_carta : forma_propia
     seccion_carta ||--o{ seccion_carta_rasgo : tiene
@@ -747,4 +832,8 @@ erDiagram
     informacion_link ||--o{ requisito_link : define
     requisito_link ||--o{ requisito_link_rasgo : admite
     rasgo ||--o{ requisito_link_rasgo : requisito_de_rasgo
+    carta ||--o{ restriccion_competitiva_carta : recibe
+    tipo_restriccion_competitiva ||--o{ restriccion_competitiva_carta : clasifica
+    carta ||--o{ restriccion_pareja : carta_a
+    carta ||--o{ restriccion_pareja : carta_b
 ```
