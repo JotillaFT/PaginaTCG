@@ -18,8 +18,8 @@ Implementado actualmente:
 - Backend Spring Boot en `backend/`.
 - Configuración de MySQL mediante Docker Compose.
 - Flyway como gestor de migraciones.
-- Migraciones V1 a V7 implementadas y validadas para el modelo inicial de cartas.
-- Entidades JPA para cartas, secciones, rasgos, colores, bloques de texto, etiquetas de efecto y palabras clave.
+- Migraciones V1 a V8 implementadas y validadas para el modelo inicial de cartas.
+- Entidades JPA para cartas, secciones, formas, rasgos, colores, bloques de texto, etiquetas de efecto, palabras clave y requisitos normales de evolución.
 - `CartaRepository`, basado en `JpaRepository<Carta, Long>`.
 - Búsqueda derivada `findByCodigo(String codigo)`.
 - Tests de integración básicos con Spring Boot y MySQL real.
@@ -33,7 +33,7 @@ No implementado todavía:
 - Controladores REST o endpoints de cartas.
 - Frontend Angular funcional. Existe una carpeta `frontend/`, pero actualmente no contiene una implementación.
 - Autenticación, usuarios, colecciones personales o mazos.
-- Impresiones, lanzamientos, evoluciones estructuradas, Link estructurado, restricciones completas o erratas completas.
+- Impresiones, lanzamientos, Link estructurado, restricciones completas o erratas completas.
 
 ## Objetivos y alcance
 
@@ -204,7 +204,7 @@ Esto implica:
 - Hibernate solo valida que las entidades coincidan con el esquema de MySQL.
 - Hibernate no debe crear ni alterar automáticamente el esquema.
 - Una migración aplicada no se edita.
-- Los cambios posteriores se hacen con nuevas migraciones, por ejemplo `V8`, `V9`, etc.
+- Los cambios posteriores se hacen con nuevas migraciones, por ejemplo `V9`, `V10`, etc.
 
 Esta decisión es central para mantener controlado el modelo de datos desde las primeras fases del proyecto.
 
@@ -219,6 +219,7 @@ Esta decisión es central para mantener controlado el modelo de datos desde las 
 - `V5__crear_tabla_bloque_texto.sql`: crea `bloque_texto`. Cada fila representa una caja oficial completa de texto asociada a una sección, con `contenido_oficial` como fuente de verdad.
 - `V6__crear_tablas_etiqueta_efecto.sql`: crea `etiqueta_efecto` y `bloque_texto_etiqueta`. Las etiquetas de efecto son un catálogo extensible y la relación indica qué etiquetas están presentes en cada bloque sin dividir `contenido_oficial`.
 - `V7__crear_tablas_palabra_clave.sql`: crea `palabra_clave` y `bloque_texto_palabra_clave`. Las palabras clave son un catálogo extensible y la relación indica qué palabras clave propias aparecen directamente en cada bloque.
+- `V8__crear_formas_y_requisitos_evolucion_normal.sql`: crea el catálogo extensible `forma_carta`, sustituye el texto de forma de `seccion_carta` por `forma_carta_id` y crea `requisito_evolucion_normal` y `requisito_evolucion_normal_color` para representar alternativas normales de evolución.
 
 ### Entidades y enums
 
@@ -226,6 +227,7 @@ Entidades actuales:
 
 - `Carta`
 - `SeccionCarta`
+- `FormaCarta`
 - `Rasgo`
 - `SeccionCartaRasgo`
 - `ColorCarta`
@@ -235,6 +237,8 @@ Entidades actuales:
 - `BloqueTextoEtiqueta`
 - `PalabraClave`
 - `BloqueTextoPalabraClave`
+- `RequisitoEvolucionNormal`
+- `RequisitoEvolucionNormalColor`
 
 Enums actuales:
 
@@ -267,8 +271,14 @@ erDiagram
         INT dp
         INT coste_juego
         INT coste_uso
-        VARCHAR forma
+        BIGINT forma_carta_id FK
         VARCHAR atributo
+    }
+
+    forma_carta {
+        BIGINT id PK
+        VARCHAR codigo UK
+        VARCHAR nombre_oficial UK
     }
 
     rasgo {
@@ -327,7 +337,26 @@ erDiagram
         BIGINT palabra_clave_id FK
     }
 
+    requisito_evolucion_normal {
+        BIGINT id PK
+        BIGINT seccion_carta_id FK
+        INT orden
+        VARCHAR categoria_origen
+        INT nivel_origen
+        BIGINT forma_origen_id FK
+        INT coste
+        BOOLEAN cualquier_color
+    }
+
+    requisito_evolucion_normal_color {
+        BIGINT id PK
+        BIGINT requisito_evolucion_normal_id FK
+        BIGINT color_id FK
+        INT orden
+    }
+
     carta ||--o{ seccion_carta : contiene
+    forma_carta o|--o{ seccion_carta : forma_propia
     seccion_carta ||--o{ seccion_carta_rasgo : tiene
     rasgo ||--o{ seccion_carta_rasgo : clasifica
     seccion_carta ||--o{ seccion_carta_color : tiene
@@ -337,6 +366,10 @@ erDiagram
     etiqueta_efecto ||--o{ bloque_texto_etiqueta : clasifica
     bloque_texto ||--o{ bloque_texto_palabra_clave : posee
     palabra_clave ||--o{ bloque_texto_palabra_clave : clasifica
+    seccion_carta ||--o{ requisito_evolucion_normal : ofrece
+    forma_carta o|--o{ requisito_evolucion_normal : forma_de_origen
+    requisito_evolucion_normal ||--o{ requisito_evolucion_normal_color : admite
+    color ||--o{ requisito_evolucion_normal_color : color_de_evolucion
 ```
 
 ## Decisiones principales del modelo
@@ -347,7 +380,9 @@ erDiagram
 - MySQL usa `utf8mb4` y `utf8mb4_0900_ai_ci`.
 - `id` es el identificador interno de MySQL; `codigo` es el número oficial visible para el usuario, por ejemplo `BT5-086`.
 - Los textos oficiales de cartas se conservan completos en inglés.
-- `forma`, `atributo` y `rasgo` son conceptos separados.
+- Forma, atributo y rasgo son conceptos separados. La forma se almacena mediante el catálogo extensible `forma_carta`, no como enum ni como texto libre en `seccion_carta`.
+- `forma_carta` contiene `id`, `codigo` y `nombre_oficial`. Sus códigos actuales son `IN_TRAINING`, `ROOKIE`, `CHAMPION`, `ULTIMATE`, `MEGA`, `ARMOR_FORM`, `HYBRID`, `D_REAPER`, `EATER`, `UNKNOWN`, `APPMON`, `STANDARD_APPMON`, `SUPER_APPMON`, `ULTIMATE_APPMON`, `GOD_APPMON` y `UNKNOWN_APPMON`.
+- `forma_carta` se reutiliza para la forma propia nullable de una sección y para la forma de origen nullable de un requisito normal; son relaciones distintas.
 - Los rasgos y colores se modelan como relaciones reutilizables, no como columnas numeradas ni listas separadas por comas.
 - Los atributos que no existen se guardan como `NULL`; no se usan valores artificiales como `0`, `-1` o `"-"` para expresar ausencia.
 - `nivel`, `dp` y costes se representan con `Integer` en Java para conservar correctamente los `NULL`.
@@ -356,6 +391,11 @@ erDiagram
 - Cada `BloqueTexto` guarda una caja oficial completa. `bloque_texto_etiqueta` permite indicar presencia de etiquetas dentro del bloque, sin dividir inicialmente cada frase o efecto individual.
 - Las etiquetas de efecto son un catálogo extensible en `etiqueta_efecto`, no un enum. La tabla todavía no contiene datos iniciales.
 - Las palabras clave tienen estructura relacional mediante `palabra_clave` y `bloque_texto_palabra_clave`, pero el catálogo inicial y la importación de relaciones siguen pendientes.
+- Cada fila de `requisito_evolucion_normal` representa una alternativa oficial completa. Sus campos forman conjuntamente una condición y `orden` conserva su posición visual.
+- `categoria_origen`, `nivel_origen` y `forma_origen_id` son nullable. `categoria_origen` solo se informa cuando Bandai exige explícitamente una categoría; no se deduce `DIGIMON` o `DIGI_EGG` a partir del nivel.
+- El coste de evolución es obligatorio y puede ser `0`. Los colores concretos del requisito se relacionan mediante `requisito_evolucion_normal_color`, independientemente de los colores propios de la sección almacenados en `seccion_carta_color`.
+- `cualquier_color = true` expresa cualquier color y excluye relaciones con colores concretos. Con `cualquier_color = false`, la ausencia de esas relaciones significa que el requisito no exige color.
+- Las evoluciones especiales por nombre, rasgo, ADN, Burst, Blast, App Fusion u otras condiciones escritas permanecen en `BloqueTexto.contenidoOficial`; se localizarán mediante búsqueda textual o patrones oficiales exactos, sin convertirlas en requisitos normales ni etiquetas semánticas inferidas.
 
 ## Fuente de datos prevista
 
@@ -384,7 +424,7 @@ Planificado, pero no implementado todavía:
 - Importador desde Heroicc API / Bulk Data.
 - Carga de una muestra curada y posterior importación completa del catálogo.
 - Modelo de impresiones y lanzamientos para imágenes, artes alternativas, reimpresiones, productos y fechas.
-- Evoluciones normales estructuradas.
+- Importación y validación de los requisitos normales de evolución desde la fuente de datos.
 - Conservación de evoluciones especiales en texto oficial, con localización posterior mediante búsqueda textual o patrones oficiales exactos, no mediante etiquetas semánticas inferidas.
 - Link estructurado: requisitos, coste, bonificación de DP, efecto y etiquetas relacionadas.
 - Catálogo inicial de etiquetas de efecto, que se definirá analizando los textos oficiales importados. Podrá incluir códigos normalizados como `MAIN`, `DELAY`, `ON_PLAY`, `WHEN_DIGIVOLVING`, `WHEN_ATTACKING`, `ALL_TURNS` u `ON_DELETION`.

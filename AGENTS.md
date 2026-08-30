@@ -25,7 +25,7 @@
 - Backend confirmado: Spring Boot 4.1.1, Java 25, Gradle 9.5.1 y MySQL 8.4 en Docker.
 - Puertos actuales: backend `8080` y MySQL del host `3307`.
 - Flyway y Hibernate deben validar el esquema; la aplicación no debe modificarlo automáticamente. Mantén el modo de Hibernate equivalente a `validate`.
-- La base aplicada y validada actualmente llega de V1 a V7. No edites migraciones ya aplicadas para cambiar el modelo: crea una migración nueva con el siguiente número disponible. Verifica siempre el directorio de migraciones antes de decidir cuál es ese número.
+- La base aplicada y validada actualmente llega de V1 a V8. `V8__crear_formas_y_requisitos_evolucion_normal.sql` ya está aplicada y no debe modificarse, ni siquiera en formato, espacios, comentarios o salto de línea final. Para cambiar el modelo, crea una migración nueva desde V9 o desde el siguiente número disponible tras verificar el directorio real.
 - En Windows, los tests del backend han funcionado usando `GRADLE_USER_HOME=C:\GradleHome`.
 - No trates los avisos de conversión entre LF y CRLF como errores funcionales. Aun así, `git diff --check` debe terminar sin errores reales de espacios o marcadores.
 
@@ -51,6 +51,7 @@
 ### Forma, atributo, rasgos y colores
 
 - Forma, atributo y rasgos son conceptos distintos: forma `Mega`, atributo `Vaccine` y rasgos como `Holy Warrior` o `Royal Knight`.
+- `FormaCarta` es un catálogo extensible, no un enum. `SeccionCarta.formaCarta` representa la forma propia nullable de la sección y `RequisitoEvolucionNormal.formaOrigen` representa la forma de origen nullable exigida; son relaciones distintas con el mismo catálogo.
 - No describas `Rasgo` genéricamente como “tipo”, porque se puede confundir con la categoría de carta.
 - Los colores forman un catálogo relacional reutilizable. Una sección puede tener uno o varios colores y `orden` conserva el orden oficial.
 - No sustituyas las relaciones de colores por columnas `color1`, `color2` ni por texto separado por comas.
@@ -68,10 +69,13 @@
 
 ### Evoluciones y fuentes externas
 
-- Los requisitos normales de evolución se modelarán de forma estructurada en una migración futura; no los des por implementados sin comprobar el repositorio.
-- Las evoluciones especiales y sus condiciones se conservan completas en el texto oficial y se localizan mediante búsqueda textual o patrones oficiales exactos. No inventes etiquetas semánticas para interpretarlas.
+- Los requisitos normales de evolución están estructurados desde V8. Cada fila de `RequisitoEvolucionNormal` pertenece a una sección y representa una alternativa oficial completa cuyos campos forman conjuntamente una condición; `orden` conserva su posición visual.
+- `categoriaOrigen` solo se rellena cuando Bandai exige explícitamente una categoría, como `TAMER`; no deduzcas `DIGIMON` o `DIGI_EGG` a partir de `nivelOrigen`. Tanto `nivelOrigen` como `formaOrigen` pueden ser `null` y el coste es obligatorio, incluido el valor `0`.
+- Los colores concretos de un requisito se guardan mediante `RequisitoEvolucionNormalColor` y son distintos de los colores propios de la sección almacenados en `SeccionCartaColor`.
+- `cualquierColor = true` significa que el requisito admite cualquier color y no debe tener relaciones con colores concretos. `cualquierColor = false` sin colores relacionados significa que el requisito no exige color.
+- Las evoluciones por nombre, rasgo, ADN, Burst, Blast, App Fusion u otras condiciones escritas se conservan completas en `BloqueTexto.contenidoOficial` y se localizan mediante búsqueda textual o patrones oficiales exactos. No las conviertas en requisitos normales estructurados ni en etiquetas semánticas inferidas.
 - Los datos importados desde Heroicc pueden contener omisiones. La falta de un color no significa “cualquier color”.
-- “Cualquier color” debe representarse explícitamente mediante todos los colores admitidos.
+- “Cualquier color” se representa explícitamente con el booleano `cualquierColor`, no relacionando todos los colores existentes.
 - Se conocen al menos las omisiones del color amarillo en los requisitos normales de evolución de `BT23-034 Sakuyamon` y `BT23-028 Coordemon`. La validación y corrección pertenece al futuro importador, no a las entidades actuales.
 
 ## Documentación y coherencia

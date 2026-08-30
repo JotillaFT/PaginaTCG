@@ -12,7 +12,7 @@ spring.jpa.hibernate.ddl-auto=validate
 
 Esto significa que Hibernate valida que las entidades coincidan con el esquema, pero no crea, modifica ni elimina tablas. Las migraciones ya aplicadas son inmutables: no se editan para cambiar formato, comentarios, restricciones o sentencias, porque eso alteraría el checksum de Flyway.
 
-El estado actual llega hasta `V7__crear_tablas_palabra_clave.sql`. El siguiente cambio de esquema deberá comenzar en `V8` o en la siguiente versión que corresponda según el estado real del repositorio. `V8` se contempla únicamente como siguiente paso previsto para los requisitos normales de evolución; no está implementada todavía.
+El estado actual llega hasta `V8__crear_formas_y_requisitos_evolucion_normal.sql`. Las migraciones V1 a V8 están aplicadas y validadas y no deben modificarse. El siguiente cambio de esquema deberá comenzar en `V9` o en la siguiente versión que corresponda según el estado real del repositorio.
 
 ## Migraciones
 
@@ -68,7 +68,8 @@ Columnas principales:
 - `categoria_seccion`: categoría funcional de la sección, almacenada como `VARCHAR`.
 - `nombre`: nombre de la sección.
 - `nivel`, `dp`, `coste_juego`, `coste_uso`: valores numéricos nullable.
-- `forma`, `atributo`: datos oficiales nullable.
+- `atributo`: dato oficial nullable.
+- `forma`: columna textual creada originalmente por V2, migrada al catálogo `forma_carta` y eliminada por V8.
 
 Restricciones:
 
@@ -280,6 +281,60 @@ Entidades Java relacionadas:
 - `BloqueTextoPalabraClave`
 - `BloqueTexto`
 
+### V8__crear_formas_y_requisitos_evolucion_normal.sql
+
+Crea el catálogo de formas y la estructura de los requisitos normales de evolución.
+
+Tablas creadas:
+
+- `forma_carta`
+- `requisito_evolucion_normal`
+- `requisito_evolucion_normal_color`
+
+Cambios en `seccion_carta`:
+
+- Añade `forma_carta_id` nullable como relación con `forma_carta`.
+- Migra las formas textuales existentes comparando su valor con `nombre_oficial`.
+- Comprueba que toda forma textual no vacía haya podido migrarse.
+- Elimina la columna textual `forma` después de la comprobación.
+
+Catálogo `forma_carta`:
+
+- Sus campos son `id`, `codigo` y `nombre_oficial`.
+- Es un catálogo extensible, no un enum.
+- Se reutiliza tanto para la forma propia de una sección como para la forma de origen exigida por un requisito. Estas relaciones son independientes.
+- V8 inserta `IN_TRAINING`, `ROOKIE`, `CHAMPION`, `ULTIMATE`, `MEGA`, `ARMOR_FORM`, `HYBRID`, `D_REAPER`, `EATER`, `UNKNOWN`, `APPMON`, `STANDARD_APPMON`, `SUPER_APPMON`, `ULTIMATE_APPMON`, `GOD_APPMON` y `UNKNOWN_APPMON`.
+
+Requisitos normales:
+
+- Cada fila de `requisito_evolucion_normal` pertenece a una `SeccionCarta` y representa una alternativa oficial completa.
+- Los campos presentes en una misma fila forman conjuntamente una condición.
+- `orden` conserva la posición visual oficial de la alternativa dentro de la sección.
+- `categoria_origen` es nullable y solo se rellena si Bandai exige explícitamente una categoría, como `TAMER`. No se deduce `DIGIMON` o `DIGI_EGG` a partir de `nivel_origen`.
+- `nivel_origen` y `forma_origen_id` son nullable. `forma_origen_id` conserva exactamente la forma exigida por el requisito.
+- `coste` es obligatorio, debe ser mayor o igual que cero y admite el valor `0`.
+- Los colores concretos admitidos se relacionan mediante `requisito_evolucion_normal_color`, cuyo `orden` conserva su posición oficial.
+- `cualquier_color = true` significa que el requisito admite cualquier color y no tendrá relaciones con colores concretos.
+- `cualquier_color = false` sin filas en `requisito_evolucion_normal_color` significa que el requisito no exige color.
+- Los colores del requisito son independientes de los colores propios de la sección almacenados en `seccion_carta_color`.
+
+Restricciones y claves foráneas principales:
+
+- Unique `uk_requisito_evolucion_normal_seccion_orden` sobre `(seccion_carta_id, orden)`.
+- Checks para exigir `orden > 0`, `nivel_origen` nulo o positivo y `coste >= 0`.
+- `seccion_carta_id` referencia `seccion_carta(id)` con `ON DELETE CASCADE`.
+- `forma_origen_id` y `seccion_carta.forma_carta_id` referencian `forma_carta(id)` con `ON DELETE RESTRICT`.
+- En `requisito_evolucion_normal_color` no pueden repetirse un color ni una posición dentro del mismo requisito.
+- Sus claves foráneas usan `ON DELETE CASCADE` hacia el requisito y `ON DELETE RESTRICT` hacia `color`.
+
+Entidades Java relacionadas:
+
+- `FormaCarta`
+- `SeccionCarta`
+- `RequisitoEvolucionNormal`
+- `RequisitoEvolucionNormalColor`
+- `ColorCarta`
+
 ## Decisiones del dominio
 
 `Carta` representa la identidad lógica común de una carta: código oficial, nombre general, categoría, rareza base, icono de bloque y límite de copias. `SeccionCarta` representa cada parte funcional de esa carta. Una carta normal suele tener una sección; una carta `DUAL` puede tener varias secciones, cada una con su categoría concreta.
@@ -288,7 +343,9 @@ Como cada `BloqueTexto` pertenece a una `SeccionCarta`, los datos asociados a un
 
 La ausencia real de datos como nivel, DP o costes se representa con `NULL`. No se usan valores artificiales como `0`, `-1` o `"-"` para expresar que el dato no existe. Existen Digimon sin nivel, por lo que `nivel` debe poder ser `NULL`.
 
-Forma, atributo y rasgos son conceptos separados. Por ejemplo, una sección puede tener forma `Mega`, atributo `Vaccine` y rasgos como `Holy Warrior` y `Royal Knight`. Los rasgos no se guardan como texto separado por comas ni como columnas numeradas.
+Forma, atributo y rasgos son conceptos separados. Por ejemplo, una sección puede relacionarse con la forma `MEGA`, tener atributo `Vaccine` y rasgos como `Holy Warrior` y `Royal Knight`. Los rasgos no se guardan como texto separado por comas ni como columnas numeradas.
+
+`forma_carta` es un catálogo extensible con `id`, `codigo` y `nombre_oficial`. `SeccionCarta.formaCarta` representa la forma propia de la sección, mientras que `RequisitoEvolucionNormal.formaOrigen` representa la forma exigida al origen de la evolución. Ambas relaciones reutilizan el catálogo, pero expresan datos diferentes.
 
 Rasgos y colores son catálogos reutilizables. Las tablas relacionales `seccion_carta_rasgo` y `seccion_carta_color` permiten filtrar por múltiples valores y conservar el orden oficial.
 
@@ -300,7 +357,11 @@ Las palabras clave son mecánicas como `<Blocker>`, `<Rush>` o `<Jamming>`. La r
 
 `limite_copias_regla` representa el límite propio de construcción asociado a la carta. El valor habitual por defecto es `4`. No almacena automáticamente restricciones externas, baneos o pares prohibidos; esas restricciones se modelarán posteriormente.
 
-Los enums se reservan para conjuntos cerrados y controlados, como `CategoriaCarta` y `CategoriaBloqueTexto`. Los catálogos extensibles, como etiquetas de efecto y palabras clave, se almacenan en tablas.
+Los enums se reservan para conjuntos cerrados y controlados, como `CategoriaCarta` y `CategoriaBloqueTexto`. Los catálogos extensibles, como formas, etiquetas de efecto y palabras clave, se almacenan en tablas.
+
+Cada fila de `requisito_evolucion_normal` es una alternativa oficial completa. `categoria_origen`, `nivel_origen`, `forma_origen_id`, los colores relacionados y `coste` forman conjuntamente su condición; no son alternativas independientes entre sí. `categoria_origen` solo se utiliza cuando la categoría aparece de forma explícita y no se infiere a partir del nivel.
+
+El modelo diferencia los colores propios de una sección, almacenados mediante `seccion_carta_color`, de los colores admitidos por un requisito, almacenados mediante `requisito_evolucion_normal_color`. `cualquier_color = true` representa de forma explícita que cualquier color es válido. Con `cualquier_color = false`, la ausencia de colores relacionados indica que el requisito no exige color.
 
 ### Criterios de interpretación del texto oficial
 
@@ -313,9 +374,9 @@ No se crean etiquetas semánticas inferidas para reducciones de coste, acciones 
 
 Las menciones, concesiones, eliminaciones, negaciones o usos condicionales de palabras clave se consultan mediante búsqueda textual en `contenido_oficial`. Esto incluye casos donde una frase concede una palabra clave a la propia sección: al ser una concesión mediante otro efecto, no genera una fila en `bloque_texto_palabra_clave`.
 
-Las evoluciones normales estructuradas están previstas para una migración futura. Las evoluciones especiales y sus condiciones se conservarán completas dentro del texto oficial y podrán localizarse mediante búsqueda textual o patrones oficiales exactos, sin crear clasificaciones semánticas excesivas.
+Los requisitos normales de evolución están estructurados desde V8. Las evoluciones por nombre, rasgo, ADN, Burst, Blast, App Fusion u otras condiciones escritas no se guardan en esas tablas: permanecen completas dentro de `BloqueTexto.contenidoOficial` y podrán localizarse mediante búsqueda textual o patrones oficiales exactos, sin convertirlas en etiquetas semánticas inferidas.
 
-Un valor de color ausente en Heroicc no debe interpretarse como "cualquier color". "Cualquier color" deberá estar representado explícitamente por los colores admitidos. La validación y corrección de omisiones conocidas en requisitos estructurados, como el color amarillo de la evolución normal de `BT23-034` Sakuyamon y `BT23-028` Coordemon, corresponderá al futuro importador, no a las entidades actuales.
+Un valor de color ausente en Heroicc no debe interpretarse como "cualquier color". Este caso se representa expresamente con `cualquier_color = true`; con el booleano a `false`, la ausencia de colores relacionados significa que el requisito no exige color. La validación y corrección de omisiones conocidas, como el color amarillo de la evolución normal de `BT23-034` Sakuyamon y `BT23-028` Coordemon, corresponderá al futuro importador.
 
 ## Ejemplos
 
@@ -326,8 +387,15 @@ Carta con varios colores:
 
 Sección con varios rasgos:
 
-- Omnimon podría tener `forma = "Mega"`, `atributo = "Vaccine"` y rasgos `Holy Warrior` y `Royal Knight`.
+- Omnimon podría relacionarse con `forma_carta.codigo = "MEGA"`, tener `atributo = "Vaccine"` y rasgos `Holy Warrior` y `Royal Knight`.
 - Los rasgos se guardan como filas reutilizables en `rasgo` y se relacionan con la sección mediante `seccion_carta_rasgo`.
+
+Requisito normal con varios campos:
+
+- Un requisito tradicional puede exigir nivel `5`, uno de varios colores concretos y coste `3`; `forma_origen_id` permanece `NULL` porque la carta no exige una forma.
+- Un requisito Appmon puede exigir forma `STANDARD_APPMON`, `cualquier_color = true` y coste `2`; `nivel_origen` permanece `NULL` porque la carta no exige un nivel.
+- Si la impresión muestra otra alternativa, se crea otra fila de `requisito_evolucion_normal` con un `orden` diferente.
+- Los colores de estas alternativas se relacionan con `requisito_evolucion_normal_color`; no modifican los colores propios de la sección.
 
 Bloque con varias etiquetas:
 
@@ -371,8 +439,14 @@ erDiagram
         INT dp
         INT coste_juego
         INT coste_uso
-        VARCHAR forma
+        BIGINT forma_carta_id FK
         VARCHAR atributo
+    }
+
+    forma_carta {
+        BIGINT id PK
+        VARCHAR codigo UK
+        VARCHAR nombre_oficial UK
     }
 
     rasgo {
@@ -431,7 +505,26 @@ erDiagram
         BIGINT palabra_clave_id FK
     }
 
+    requisito_evolucion_normal {
+        BIGINT id PK
+        BIGINT seccion_carta_id FK
+        INT orden
+        VARCHAR categoria_origen
+        INT nivel_origen
+        BIGINT forma_origen_id FK
+        INT coste
+        BOOLEAN cualquier_color
+    }
+
+    requisito_evolucion_normal_color {
+        BIGINT id PK
+        BIGINT requisito_evolucion_normal_id FK
+        BIGINT color_id FK
+        INT orden
+    }
+
     carta ||--o{ seccion_carta : contiene
+    forma_carta o|--o{ seccion_carta : forma_propia
     seccion_carta ||--o{ seccion_carta_rasgo : tiene
     rasgo ||--o{ seccion_carta_rasgo : clasifica
     seccion_carta ||--o{ seccion_carta_color : tiene
@@ -441,4 +534,8 @@ erDiagram
     etiqueta_efecto ||--o{ bloque_texto_etiqueta : clasifica
     bloque_texto ||--o{ bloque_texto_palabra_clave : posee
     palabra_clave ||--o{ bloque_texto_palabra_clave : clasifica
+    seccion_carta ||--o{ requisito_evolucion_normal : ofrece
+    forma_carta o|--o{ requisito_evolucion_normal : forma_de_origen
+    requisito_evolucion_normal ||--o{ requisito_evolucion_normal_color : admite
+    color ||--o{ requisito_evolucion_normal_color : color_de_evolucion
 ```

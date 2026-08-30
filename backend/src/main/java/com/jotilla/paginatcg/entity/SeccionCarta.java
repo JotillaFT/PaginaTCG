@@ -82,11 +82,15 @@ public class SeccionCarta {
     private Integer costeUso;
 
     /**
-     * Forma oficial, por ejemplo {@code Mega}. No debe mezclarse con atributo
-     * ni con rasgos.
+     * Forma oficial propia de la sección, por ejemplo {@code Mega},
+     * {@code In-Training} o {@code Stnd./Appmon}.
+     *
+     * <p>Es {@code null} para secciones donde la forma no aplica, como Tamers
+     * u Options.</p>
      */
-    @Column(name = "forma", length = 100)
-    private String forma;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "forma_carta_id")
+    private FormaCarta formaCarta;
 
     /**
      * Atributo oficial, por ejemplo {@code Vaccine}. Los rasgos múltiples se
@@ -178,12 +182,12 @@ public class SeccionCarta {
         this.costeUso = costeUso;
     }
 
-    public String getForma() {
-        return forma;
+    public FormaCarta getFormaCarta() {
+        return formaCarta;
     }
 
-    public void setForma(String forma) {
-        this.forma = forma;
+    public void setFormaCarta(FormaCarta formaCarta) {
+        this.formaCarta = formaCarta;
     }
 
     public String getAtributo() {
