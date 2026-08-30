@@ -12,7 +12,7 @@ spring.jpa.hibernate.ddl-auto=validate
 
 Esto significa que Hibernate valida que las entidades coincidan con el esquema, pero no crea, modifica ni elimina tablas. Las migraciones ya aplicadas son inmutables: no se editan para cambiar formato, comentarios, restricciones o sentencias, porque eso alteraría el checksum de Flyway.
 
-El estado actual llega hasta `V9__crear_impresiones_y_lanzamientos.sql`. Las migraciones V1 a V9 están implementadas, aplicadas y validadas y no deben modificarse. El siguiente cambio de esquema deberá comenzar en `V10` o en la siguiente versión que corresponda según el estado real del repositorio.
+El estado actual llega hasta `V10__crear_informacion_link.sql`. Las migraciones V1 a V10 están implementadas, aplicadas y validadas y no deben modificarse. El siguiente cambio de esquema deberá comenzar en `V11` o en la siguiente versión que corresponda según el estado real del repositorio.
 
 ## Migraciones
 
@@ -395,6 +395,58 @@ Entidades Java relacionadas:
 - `Ilustrador`
 - `ImpresionCartaIlustrador`
 
+### V10__crear_informacion_link.sql
+
+Estructura la información propia de la mecánica Link y sus requisitos sin trasladar a estas tablas los efectos funcionales de la carta.
+
+Tablas creadas:
+
+- `informacion_link`
+- `requisito_link`
+- `requisito_link_rasgo`
+
+Información estructural Link:
+
+- Cada fila de `informacion_link` pertenece obligatoriamente a una `SeccionCarta`.
+- La restricción unique sobre `seccion_carta_id` permite como máximo una `InformacionLink` por sección.
+- `bonificacion_dp` almacena la bonificación numérica de DP y debe ser mayor o igual que cero.
+- `contenido_dp_oficial` conserva la representación oficial completa del valor de Link DP definida por la carta.
+- `InformacionLink` no representa todo el bloque visual Link ni almacena sus efectos.
+- No existe una foreign key ni una relación JPA directa entre `informacion_link` y `bloque_texto`.
+
+Requisitos Link:
+
+- Una `InformacionLink` puede tener varios `RequisitoLink`.
+- Cada fila de `requisito_link` representa una alternativa oficial completa para realizar Link.
+- `orden` conserva la posición visual de la alternativa, `coste` almacena su coste y `contenido_oficial` mantiene el texto íntegro del requisito.
+- La combinación `(informacion_link_id, orden)` es única.
+- `requisito_link_rasgo` permite relacionar uno o varios rasgos admitidos por un requisito.
+- Sus relaciones con `Rasgo` representan condiciones del requisito, no rasgos propios de la `SeccionCarta`.
+- `orden` conserva la posición oficial de los rasgos y no pueden repetirse un rasgo ni una posición dentro del mismo requisito.
+
+Efectos Link:
+
+- Los efectos que aparecen visualmente en la zona Link continúan en el sistema general de `BloqueTexto`.
+- Cuando una caja corresponde a un efecto Link, utiliza `CategoriaBloqueTexto.LINK_EFFECT`.
+- Esta separación mantiene independientes la estructura de la mecánica, los requisitos para utilizarla y los efectos funcionales escritos de la carta.
+
+Relaciones y borrado:
+
+- Las relaciones Java usan `FetchType.LAZY` y no incorporan cascadas JPA, `orphanRemoval` ni relaciones bidireccionales innecesarias.
+- `informacion_link.seccion_carta_id`, `requisito_link.informacion_link_id` y `requisito_link_rasgo.requisito_link_id` usan `ON DELETE CASCADE`.
+- `requisito_link_rasgo.rasgo_id` usa `ON DELETE RESTRICT`.
+- Flyway y MySQL, no las cascadas JPA, mantienen estos comportamientos de borrado.
+
+Entidades Java relacionadas:
+
+- `InformacionLink`
+- `RequisitoLink`
+- `RequisitoLinkRasgo`
+- `SeccionCarta`
+- `Rasgo`
+- `BloqueTexto`
+- `CategoriaBloqueTexto`
+
 ## Decisiones del dominio
 
 `Carta` representa la identidad funcional única de una carta por código oficial: nombre general, categoría, rareza base, icono de bloque y límite de copias. `SeccionCarta` representa cada parte funcional de esa carta. Una carta normal suele tener una sección; una carta `DUAL` puede tener varias secciones, cada una con su categoría concreta.
@@ -432,6 +484,16 @@ El contenido funcional canónico y buscable permanece en inglés. Inicialmente s
 Una impresión puede aparecer en varios lanzamientos mediante `impresion_carta_lanzamiento`. También puede tener cero, uno o varios ilustradores mediante `impresion_carta_ilustrador`, cuyo `orden` conserva la secuencia del crédito. Heroicc no ofrece actualmente el ilustrador como campo documentado, por lo que su futura importación requerirá otra fuente o una extracción posterior desde la imagen.
 
 El frontend podrá elegir entre mostrar únicamente la impresión base o todas las variantes. Las futuras colecciones y mazos podrán relacionarse con la impresión concreta elegida por el usuario sin modificar la identidad funcional de `Carta`.
+
+### Link: estructura, requisitos y efectos
+
+`InformacionLink` representa exclusivamente la información estructural que indica que una sección posee Link: la bonificación numérica de DP y su representación oficial. Una sección puede tener como máximo una fila de esta entidad.
+
+Los requisitos se modelan aparte. Cada `RequisitoLink` es una alternativa oficial completa con orden, coste y texto íntegro, y puede relacionarse con varios rasgos admitidos mediante `RequisitoLinkRasgo`. Esos rasgos son condiciones para realizar Link y no deben confundirse con los rasgos propios de la sección almacenados en `seccion_carta_rasgo`.
+
+Los efectos de la carta, incluidos `When Linking`, `When Attacking`, `On Deletion` u otros que aparezcan visualmente en la zona Link, continúan en `BloqueTexto`. Utilizan `CategoriaBloqueTexto.LINK_EFFECT` cuando la caja oficial corresponde a Link. No existe una relación directa entre `InformacionLink` y `BloqueTexto` porque describen responsabilidades diferentes.
+
+Esta estructura no convierte en requisitos normales otras evoluciones especiales como ADN, Burst, Blast o App Fusion. Esas condiciones siguen conservándose en el texto oficial según las decisiones anteriores.
 
 ### Criterios de interpretación del texto oficial
 
@@ -637,6 +699,28 @@ erDiagram
         INT orden
     }
 
+    informacion_link {
+        BIGINT id PK
+        BIGINT seccion_carta_id FK
+        INT bonificacion_dp
+        VARCHAR contenido_dp_oficial
+    }
+
+    requisito_link {
+        BIGINT id PK
+        BIGINT informacion_link_id FK
+        INT orden
+        INT coste
+        TEXT contenido_oficial
+    }
+
+    requisito_link_rasgo {
+        BIGINT id PK
+        BIGINT requisito_link_id FK
+        BIGINT rasgo_id FK
+        INT orden
+    }
+
     carta ||--o{ seccion_carta : contiene
     forma_carta o|--o{ seccion_carta : forma_propia
     seccion_carta ||--o{ seccion_carta_rasgo : tiene
@@ -659,4 +743,8 @@ erDiagram
     lanzamiento ||--o{ impresion_carta_lanzamiento : incluye
     impresion_carta ||--o{ impresion_carta_ilustrador : acredita
     ilustrador ||--o{ impresion_carta_ilustrador : recibe_credito
+    seccion_carta ||--o| informacion_link : posee
+    informacion_link ||--o{ requisito_link : define
+    requisito_link ||--o{ requisito_link_rasgo : admite
+    rasgo ||--o{ requisito_link_rasgo : requisito_de_rasgo
 ```

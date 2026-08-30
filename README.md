@@ -18,8 +18,8 @@ Implementado actualmente:
 - Backend Spring Boot en `backend/`.
 - Configuración de MySQL mediante Docker Compose.
 - Flyway como gestor de migraciones.
-- Migraciones V1 a V9 implementadas, aplicadas y validadas para el modelo de cartas.
-- Entidades JPA para el contenido funcional de las cartas, sus requisitos de evolución, idiomas, impresiones, lanzamientos e ilustradores.
+- Migraciones V1 a V10 implementadas, aplicadas y validadas para el modelo de cartas.
+- Entidades JPA para el contenido funcional de las cartas, sus requisitos de evolución, Link, idiomas, impresiones, lanzamientos e ilustradores.
 - `CartaRepository`, basado en `JpaRepository<Carta, Long>`.
 - Búsqueda derivada `findByCodigo(String codigo)`.
 - Tests de integración básicos con Spring Boot y MySQL real.
@@ -33,7 +33,7 @@ No implementado todavía:
 - Controladores REST o endpoints de cartas.
 - Frontend Angular funcional. Existe una carpeta `frontend/`, pero actualmente no contiene una implementación.
 - Autenticación, usuarios, colecciones personales o mazos.
-- Link estructurado, restricciones completas o erratas completas.
+- Restricciones completas o erratas completas.
 
 ## Objetivos y alcance
 
@@ -204,7 +204,7 @@ Esto implica:
 - Hibernate solo valida que las entidades coincidan con el esquema de MySQL.
 - Hibernate no debe crear ni alterar automáticamente el esquema.
 - Una migración aplicada no se edita.
-- Los cambios posteriores se hacen con nuevas migraciones, por ejemplo `V10`, `V11`, etc.
+- Los cambios posteriores se hacen con nuevas migraciones, por ejemplo `V11`, `V12`, etc.
 
 Esta decisión es central para mantener controlado el modelo de datos desde las primeras fases del proyecto.
 
@@ -221,6 +221,7 @@ Esta decisión es central para mantener controlado el modelo de datos desde las 
 - `V7__crear_tablas_palabra_clave.sql`: crea `palabra_clave` y `bloque_texto_palabra_clave`. Las palabras clave son un catálogo extensible y la relación indica qué palabras clave propias aparecen directamente en cada bloque.
 - `V8__crear_formas_y_requisitos_evolucion_normal.sql`: crea el catálogo extensible `forma_carta`, sustituye el texto de forma de `seccion_carta` por `forma_carta_id` y crea `requisito_evolucion_normal` y `requisito_evolucion_normal_color` para representar alternativas normales de evolución.
 - `V9__crear_impresiones_y_lanzamientos.sql`: crea `idioma`, `lanzamiento`, `impresion_carta`, `impresion_carta_lanzamiento`, `ilustrador` e `impresion_carta_ilustrador` para separar la identidad funcional de una carta de sus variantes físicas o gráficas.
+- `V10__crear_informacion_link.sql`: crea `informacion_link`, `requisito_link` y `requisito_link_rasgo` para separar la estructura de la mecánica Link, sus requisitos y los efectos funcionales conservados en `bloque_texto`.
 
 ### Entidades y enums
 
@@ -246,6 +247,9 @@ Entidades actuales:
 - `ImpresionCartaLanzamiento`
 - `Ilustrador`
 - `ImpresionCartaIlustrador`
+- `InformacionLink`
+- `RequisitoLink`
+- `RequisitoLinkRasgo`
 
 Enums actuales:
 
@@ -406,6 +410,28 @@ erDiagram
         INT orden
     }
 
+    informacion_link {
+        BIGINT id PK
+        BIGINT seccion_carta_id FK
+        INT bonificacion_dp
+        VARCHAR contenido_dp_oficial
+    }
+
+    requisito_link {
+        BIGINT id PK
+        BIGINT informacion_link_id FK
+        INT orden
+        INT coste
+        TEXT contenido_oficial
+    }
+
+    requisito_link_rasgo {
+        BIGINT id PK
+        BIGINT requisito_link_id FK
+        BIGINT rasgo_id FK
+        INT orden
+    }
+
     carta ||--o{ seccion_carta : contiene
     forma_carta o|--o{ seccion_carta : forma_propia
     seccion_carta ||--o{ seccion_carta_rasgo : tiene
@@ -428,6 +454,10 @@ erDiagram
     lanzamiento ||--o{ impresion_carta_lanzamiento : incluye
     impresion_carta ||--o{ impresion_carta_ilustrador : acredita
     ilustrador ||--o{ impresion_carta_ilustrador : recibe_credito
+    seccion_carta ||--o| informacion_link : posee
+    informacion_link ||--o{ requisito_link : define
+    requisito_link ||--o{ requisito_link_rasgo : admite
+    rasgo ||--o{ requisito_link_rasgo : requisito_de_rasgo
 ```
 
 ## Decisiones principales del modelo
@@ -460,6 +490,11 @@ erDiagram
 - `Idioma` es un catálogo extensible que actualmente contiene `EN`, `JA`, `KO` y `ZH_HANS`. El contenido funcional canónico y buscable permanece en inglés; otros idiomas añaden impresiones relacionadas con la misma `Carta`, sin duplicar secciones, efectos ni requisitos.
 - `Lanzamiento` representa productos, promociones, torneos u otras publicaciones y puede no tener una fecha única conocida. Una impresión puede aparecer en varios lanzamientos.
 - `Ilustrador` cataloga los nombres de crédito. Una impresión puede tener cero, uno o varios ilustradores y `impresion_carta_ilustrador.orden` conserva el orden del crédito.
+- Cada `SeccionCarta` puede tener como máximo una `InformacionLink`. Esta entidad guarda únicamente la bonificación de DP y la representación oficial del valor de Link DP.
+- `InformacionLink` no contiene efectos de carta ni se relaciona directamente con `BloqueTexto`. Los efectos visualmente incluidos en la zona Link permanecen en el sistema general de bloques con `CategoriaBloqueTexto.LINK_EFFECT` cuando corresponda.
+- Una `InformacionLink` puede tener varios `RequisitoLink`. Cada fila es una alternativa oficial completa y conserva su `orden`, `coste` y `contenido_oficial`.
+- `RequisitoLinkRasgo` relaciona uno o varios rasgos admitidos con un requisito y conserva su orden oficial. Estos rasgos son condiciones del requisito, independientes de los rasgos propios de `SeccionCarta`.
+- Las relaciones Java de V10 usan carga `LAZY` y no añaden cascadas JPA, `orphanRemoval` ni relaciones bidireccionales innecesarias. Los comportamientos `ON DELETE` siguen definidos por Flyway y MySQL.
 
 ## Fuente de datos prevista
 
@@ -481,6 +516,7 @@ Tratamiento previsto de algunos campos:
 - `color` se relacionará con el catálogo `color`.
 - Inicialmente solo se importarán impresiones en inglés. Las impresiones de otros idiomas se relacionarán con la misma `Carta` y no duplicarán su contenido funcional.
 - Heroicc no documenta actualmente el ilustrador como campo; esos créditos necesitarán otra fuente o una extracción posterior desde la imagen.
+- La estructura Link ya existe, pero la importación de bonificaciones, requisitos, costes y rasgos admitidos desde la fuente externa sigue pendiente.
 
 ## Roadmap
 
@@ -492,7 +528,7 @@ Planificado, pero no implementado todavía:
 - Obtención e importación posterior de los créditos de ilustración desde otra fuente o desde las imágenes.
 - Importación y validación de los requisitos normales de evolución desde la fuente de datos.
 - Conservación de evoluciones especiales en texto oficial, con localización posterior mediante búsqueda textual o patrones oficiales exactos, no mediante etiquetas semánticas inferidas.
-- Link estructurado: requisitos, coste, bonificación de DP, efecto y etiquetas relacionadas.
+- Importación y validación de la información estructural y los requisitos Link desde la fuente externa.
 - Catálogo inicial de etiquetas de efecto, que se definirá analizando los textos oficiales importados. Podrá incluir códigos normalizados como `MAIN`, `DELAY`, `ON_PLAY`, `WHEN_DIGIVOLVING`, `WHEN_ATTACKING`, `ALL_TURNS` u `ON_DELETION`.
 - Extracción o detección automática de etiquetas desde los textos importados de Heroicc.
 - Población del catálogo inicial de palabras clave, detección/importación de palabras clave propias y uso de esas relaciones en filtros.

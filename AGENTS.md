@@ -25,7 +25,7 @@
 - Backend confirmado: Spring Boot 4.1.1, Java 25, Gradle 9.5.1 y MySQL 8.4 en Docker.
 - Puertos actuales: backend `8080` y MySQL del host `3307`.
 - Flyway y Hibernate deben validar el esquema; la aplicación no debe modificarlo automáticamente. Mantén el modo de Hibernate equivalente a `validate`.
-- La base implementada, aplicada y validada actualmente llega de V1 a V9. `V9__crear_impresiones_y_lanzamientos.sql` ya está aplicada y no debe modificarse, ni siquiera en formato, espacios, comentarios o salto de línea final. Las migraciones anteriores también son inmutables. Para cambiar el modelo, crea una migración nueva desde V10 o desde el siguiente número disponible tras verificar el directorio real.
+- La base implementada, aplicada y validada actualmente llega de V1 a V10. `V10__crear_informacion_link.sql` ya está aplicada y no debe modificarse, ni siquiera en formato, espacios, comentarios o salto de línea final. Las migraciones anteriores también son inmutables. Para cambiar el modelo, crea una migración nueva desde V11 o desde el siguiente número disponible tras verificar el directorio real.
 - En Windows, los tests del backend han funcionado usando `GRADLE_USER_HOME=C:\GradleHome`.
 - No trates los avisos de conversión entre LF y CRLF como errores funcionales. Aun así, `git diff --check` debe terminar sin errores reales de espacios o marcadores.
 
@@ -77,6 +77,17 @@
 - `BloqueTextoPalabraClave` relaciona un bloque con una palabra clave presentada directamente como efecto propio de esa sección. No globalices esa relación a toda la carta.
 - Una palabra clave meramente mencionada, concedida mediante otra frase —incluso a la propia carta—, retirada, negada o usada como condición no crea esa relación. Esos casos se consultan en `contenidoOficial`.
 - No infieras ni persistas por ahora clasificaciones semánticas como `PLAY_COST_REDUCTION`, `DIGIVOLUTION_COST_REDUCTION`, `PLAY_WITHOUT_PAYING_COST`, `DIGIVOLVE_WITHOUT_PAYING_COST` o `IGNORE_DIGIVOLUTION_REQUIREMENTS`. Conserva sus distintas redacciones y contextos en `contenidoOficial` y usa búsqueda textual cuando corresponda.
+
+### Link
+
+- Cada `SeccionCarta` puede tener como máximo una `InformacionLink`, que representa exclusivamente la estructura propia de la mecánica Link.
+- `InformacionLink` almacena la bonificación de DP y la representación oficial del valor de Link DP; no almacena efectos de carta.
+- No existe una relación directa entre `InformacionLink` y `BloqueTexto`. Los efectos visualmente situados en la zona Link permanecen en `BloqueTexto` y usan `CategoriaBloqueTexto.LINK_EFFECT` cuando corresponda.
+- Una `InformacionLink` puede tener varios `RequisitoLink`. Cada requisito es una alternativa oficial completa y conserva orden, coste y texto oficial íntegro.
+- `RequisitoLinkRasgo` relaciona los rasgos admitidos por un requisito y conserva su orden oficial. Esos valores son condiciones del requisito, independientes de los rasgos propios de `SeccionCarta`.
+- Las relaciones Java de V10 usan carga `LAZY` y no incorporan cascadas JPA, `orphanRemoval` ni relaciones bidireccionales innecesarias.
+- Los `ON DELETE CASCADE` y `ON DELETE RESTRICT` de Link son responsabilidad de Flyway y MySQL.
+- Mantén separadas la estructura Link, los requisitos para realizar Link y los efectos funcionales escritos de la carta.
 
 ### Evoluciones y fuentes externas
 
