@@ -25,7 +25,7 @@
 - Backend confirmado: Spring Boot 4.1.1, Java 25, Gradle 9.5.1 y MySQL 8.4 en Docker.
 - Puertos actuales: backend `8080` y MySQL del host `3307`.
 - Flyway y Hibernate deben validar el esquema; la aplicación no debe modificarlo automáticamente. Mantén el modo de Hibernate equivalente a `validate`.
-- La base implementada, aplicada y validada actualmente llega de V1 a V12. `V12__crear_erratas.sql` ya está aplicada y no debe modificarse, ni siquiera en formato, espacios, comentarios o salto de línea final. Las migraciones anteriores también son inmutables. Para cambiar el modelo, crea una migración nueva desde V13 o desde el siguiente número disponible tras verificar el directorio real.
+- La base implementada, aplicada y validada actualmente llega de V1 a V13. `V13__crear_auditoria_importacion.sql` ya está aplicada y no debe modificarse, ni siquiera en formato, espacios, comentarios o salto de línea final. Las migraciones anteriores también son inmutables. Para cambiar el modelo, crea una migración nueva desde V14 o desde el siguiente número disponible tras verificar el directorio real.
 - En Windows, los tests del backend han funcionado usando `GRADLE_USER_HOME=C:\GradleHome`.
 - No trates los avisos de conversión entre LF y CRLF como errores funcionales. Aun así, `git diff --check` debe terminar sin errores reales de espacios o marcadores.
 
@@ -82,6 +82,16 @@
 - No interpretes automáticamente una errata propagada por Heroicc a todas las variantes del mismo código como evidencia de que todas las impresiones físicas están afectadas. Importa el historial oficial en `ErrataCarta` y crea relaciones físicas solo cuando exista evidencia suficiente.
 - `errata_carta.carta_id` usa `ON DELETE CASCADE`; sus referencias opcionales a sección y bloque usan `ON DELETE SET NULL`. Las relaciones de `errata_impresion_carta` usan `ON DELETE CASCADE`. Estos comportamientos pertenecen a Flyway y MySQL.
 - La estructura de erratas ya está implementada desde V12; siguen pendientes la importación, la validación de impresiones afectadas y su presentación en el frontend.
+
+### Auditoría de importaciones
+
+- `FuenteImportacion` es un catálogo extensible de procedencias externas o manuales. V13 carga inicialmente `HEROICC`, pero la auditoría no debe acoplarse a un único proveedor.
+- `LoteImportacion` representa un intento concreto de importación o análisis. Conserva la fuente obligatoria, el idioma opcional, la identificación del recurso, su posible hash y fecha, tiempos de ejecución, estado, contadores y notas.
+- `(fuente_importacion_id, identificador_fuente)` tiene un índice normal y no es unique. Deben poder registrarse varios intentos sobre el mismo recurso para conservar fallos, reintentos y auditorías repetidas.
+- `tipoDatos`, `estado`, `severidad` y los códigos de incidencia permanecen como texto mientras el importador no defina un conjunto verdaderamente cerrado. No inventes enums o catálogos sin una necesidad demostrada.
+- `IncidenciaImportacion` pertenece a un lote y conserva mensajes con referencias opcionales al origen y al destino previsto. No crees una foreign key polimórfica hacia las entidades del catálogo.
+- Las relaciones Java de V13 usan `FetchType.LAZY` y no incorporan cascadas JPA, `orphanRemoval` ni relaciones bidireccionales innecesarias. La eliminación de incidencias con su lote y la protección de fuentes e idiomas pertenecen a Flyway y MySQL.
+- V13 implementa infraestructura de trazabilidad, no el cliente ni el importador de Heroicc. No presentes como existentes la descarga, transformación, validación o persistencia automática de datos externos.
 
 ### Forma, atributo, rasgos y colores
 

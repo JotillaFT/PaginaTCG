@@ -18,8 +18,9 @@ Implementado actualmente:
 - Backend Spring Boot en `backend/`.
 - Configuración de MySQL mediante Docker Compose.
 - Flyway como gestor de migraciones.
-- Migraciones V1 a V12 implementadas, aplicadas y validadas para el modelo de cartas.
-- Entidades JPA para el contenido funcional de las cartas, sus requisitos de evolución, Link, idiomas, impresiones, lanzamientos, ilustradores, restricciones competitivas y erratas.
+- Migraciones V1 a V13 implementadas, aplicadas y validadas para el modelo de cartas y la auditoría de futuras importaciones.
+- Entidades JPA para el contenido funcional de las cartas, sus requisitos de evolución, Link, idiomas, impresiones, lanzamientos, ilustradores, restricciones competitivas, erratas y auditoría de importaciones.
+- Infraestructura persistente para registrar fuentes, ejecuciones e incidencias de importación, todavía sin un importador funcional.
 - `CartaRepository`, basado en `JpaRepository<Carta, Long>`.
 - Búsqueda derivada `findByCodigo(String codigo)`.
 - Tests de integración básicos con Spring Boot y MySQL real.
@@ -204,7 +205,7 @@ Esto implica:
 - Hibernate solo valida que las entidades coincidan con el esquema de MySQL.
 - Hibernate no debe crear ni alterar automáticamente el esquema.
 - Una migración aplicada no se edita.
-- Los cambios posteriores se hacen con nuevas migraciones, por ejemplo `V13`, `V14`, etc.
+- Los cambios posteriores se hacen con nuevas migraciones, por ejemplo `V14`, `V15`, etc.
 
 Esta decisión es central para mantener controlado el modelo de datos desde las primeras fases del proyecto.
 
@@ -224,6 +225,7 @@ Esta decisión es central para mantener controlado el modelo de datos desde las 
 - `V10__crear_informacion_link.sql`: crea `informacion_link`, `requisito_link` y `requisito_link_rasgo` para separar la estructura de la mecánica Link, sus requisitos y los efectos funcionales conservados en `bloque_texto`.
 - `V11__crear_restricciones_competitivas.sql`: crea el catálogo `tipo_restriccion_competitiva`, las restricciones individuales de `restriccion_competitiva_carta` y los pares prohibidos de `restriccion_pareja`.
 - `V12__crear_erratas.sql`: crea `errata_carta` para conservar correcciones oficiales de la carta funcional y `errata_impresion_carta` para identificar las impresiones físicas concretas que contienen el texto erróneo.
+- `V13__crear_auditoria_importacion.sql`: crea `fuente_importacion`, `lote_importacion` e `incidencia_importacion` para auditar la procedencia, ejecución, resultados e incidencias de cada intento de importación. Incluye `HEROICC` como fuente inicial, pero no implementa el importador.
 
 ### Entidades y enums
 
@@ -257,6 +259,9 @@ Entidades actuales:
 - `RestriccionPareja`
 - `ErrataCarta`
 - `ErrataImpresionCarta`
+- `FuenteImportacion`
+- `LoteImportacion`
+- `IncidenciaImportacion`
 
 Enums actuales:
 
@@ -485,6 +490,47 @@ erDiagram
         TEXT notas
     }
 
+    fuente_importacion {
+        BIGINT id PK
+        VARCHAR codigo UK
+        VARCHAR nombre UK
+        VARCHAR url_base
+    }
+
+    lote_importacion {
+        BIGINT id PK
+        BIGINT fuente_importacion_id FK
+        BIGINT idioma_id FK
+        VARCHAR tipo_datos
+        VARCHAR identificador_fuente
+        VARCHAR url_fuente
+        CHAR hash_sha256
+        DATE fecha_datos
+        DATETIME iniciado_en
+        DATETIME finalizado_en
+        VARCHAR estado
+        INT total_registros_fuente
+        INT total_registros_procesados
+        INT total_inserciones
+        INT total_actualizaciones
+        INT total_omisiones
+        INT total_advertencias
+        INT total_errores
+        TEXT notas
+    }
+
+    incidencia_importacion {
+        BIGINT id PK
+        BIGINT lote_importacion_id FK
+        VARCHAR severidad
+        VARCHAR codigo
+        VARCHAR referencia_fuente
+        VARCHAR entidad_destino
+        VARCHAR mensaje
+        TEXT detalle
+        DATETIME creado_en
+    }
+
     carta ||--o{ seccion_carta : contiene
     forma_carta o|--o{ seccion_carta : forma_propia
     seccion_carta ||--o{ seccion_carta_rasgo : tiene
@@ -520,6 +566,9 @@ erDiagram
     bloque_texto o|--o{ errata_carta : localiza
     errata_carta ||--o{ errata_impresion_carta : afecta_fisicamente
     impresion_carta ||--o{ errata_impresion_carta : contiene_error
+    fuente_importacion ||--o{ lote_importacion : origina
+    idioma o|--o{ lote_importacion : contextualiza
+    lote_importacion ||--o{ incidencia_importacion : registra
 ```
 
 ## Decisiones principales del modelo
@@ -569,6 +618,11 @@ erDiagram
 - El texto funcional canónico mostrado y utilizado para búsquedas debe ser el texto oficial corregido. La errata conserva el texto erróneo y su corrección para explicar por qué una imagen antigua puede no coincidir con el contenido actual.
 - `ErrataImpresionCarta` relaciona una errata con las `ImpresionCarta` que contienen físicamente el error. Una reimpresión corregida conserva el historial de la carta sin quedar marcada como impresión errónea.
 - Las asociaciones de erratas propagadas por una fuente externa a todas las variantes de un mismo código no se aceptarán automáticamente como evidencia física; la futura importación deberá distinguir el historial oficial de las impresiones realmente afectadas.
+- `FuenteImportacion` es un catálogo extensible de procedencias. V13 incorpora `HEROICC` como registro inicial sin acoplar el modelo de auditoría a una única fuente.
+- Cada `LoteImportacion` representa un intento concreto de importar o analizar un recurso externo. Conserva fuente, idioma opcional, identificador y URL de origen, huella SHA-256, fechas, estado, contadores y notas.
+- La combinación de fuente e `identificador_fuente` tiene un índice normal, no una restricción única. El mismo recurso puede generar varios lotes para registrar reintentos, fallos o ejecuciones de auditoría independientes.
+- `IncidenciaImportacion` registra información, advertencias o errores de un lote con referencias opcionales al registro de origen y a la entidad de destino. No sustituye el dato original ni acopla la auditoría a una tabla concreta del catálogo.
+- V13 proporciona infraestructura de trazabilidad, no un importador: la obtención, interpretación, validación y persistencia de datos externos continúan pendientes.
 
 ## Fuente de datos prevista
 
@@ -579,7 +633,7 @@ La fuente principal prevista es la API y el Bulk Data de Heroicc:
 
 Heroicc documenta datos como `number`, `category`, `level`, `dp`, `play-cost`, `use-cost`, `form`, `attribute`, `type`, `color`, efectos, imágenes, lanzamientos, erratas y limitaciones.
 
-La importación no está implementada todavía. La estrategia prevista es empezar con una muestra curada de unas 50-100 cartas que cubra casos variados, validar el mapeo y después importar el catálogo completo con comprobaciones automáticas de duplicados, campos obligatorios, relaciones huérfanas, valores desconocidos, conteos por categoría y errores de conversión.
+La importación no está implementada todavía. V13 ya permite auditar sus futuras fuentes, lotes e incidencias, pero todavía no obtiene ni transforma datos externos. La estrategia prevista es empezar con una muestra curada de unas 50-100 cartas que cubra casos variados, validar el mapeo y después importar el catálogo completo con comprobaciones automáticas de duplicados, campos obligatorios, relaciones huérfanas, valores desconocidos, conteos por categoría y errores de conversión.
 
 Tratamiento previsto de algunos campos:
 
@@ -598,7 +652,7 @@ Tratamiento previsto de algunos campos:
 
 Planificado, pero no implementado todavía:
 
-- Importador desde Heroicc API / Bulk Data.
+- Cliente e importador desde Heroicc API / Bulk Data integrado con la auditoría de V13.
 - Carga de una muestra curada y posterior importación completa del catálogo.
 - Importación de impresiones y lanzamientos, inicialmente en inglés.
 - Obtención e importación posterior de los créditos de ilustración desde otra fuente o desde las imágenes.

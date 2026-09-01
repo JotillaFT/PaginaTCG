@@ -12,7 +12,7 @@ spring.jpa.hibernate.ddl-auto=validate
 
 Esto significa que Hibernate valida que las entidades coincidan con el esquema, pero no crea, modifica ni elimina tablas. Las migraciones ya aplicadas son inmutables: no se editan para cambiar formato, comentarios, restricciones o sentencias, porque eso alteraría el checksum de Flyway.
 
-El estado actual llega hasta `V12__crear_erratas.sql`. Las migraciones V1 a V12 están implementadas, aplicadas y validadas y no deben modificarse. El siguiente cambio de esquema deberá comenzar en `V13` o en la siguiente versión que corresponda según el estado real del repositorio.
+El estado actual llega hasta `V13__crear_auditoria_importacion.sql`. Las migraciones V1 a V13 están implementadas, aplicadas y validadas y no deben modificarse. El siguiente cambio de esquema deberá comenzar en `V14` o en la siguiente versión que corresponda según el estado real del repositorio.
 
 ## Migraciones
 
@@ -538,6 +538,51 @@ Entidades Java relacionadas:
 - `BloqueTexto`
 - `ImpresionCarta`
 
+### V13__crear_auditoria_importacion.sql
+
+Crea la infraestructura persistente para conocer la procedencia de los datos, auditar cada intento de importación y conservar las incidencias detectadas. Esta migración no implementa la descarga, transformación ni escritura del catálogo.
+
+Tablas creadas:
+
+- `fuente_importacion`
+- `lote_importacion`
+- `incidencia_importacion`
+
+Fuentes de datos:
+
+- `fuente_importacion` es un catálogo extensible de orígenes externos o manuales.
+- `codigo` y `nombre` son obligatorios y únicos; `url_base` es opcional.
+- V13 carga inicialmente la fuente `HEROICC`, con nombre `Heroicc` y su URL base. El resto del modelo no queda acoplado a ese proveedor.
+
+Lotes de importación:
+
+- Cada `lote_importacion` representa una ejecución concreta de importación o análisis, no la identidad permanente del recurso externo.
+- La fuente es obligatoria. El idioma es opcional porque algunos recursos pueden ser independientes del idioma.
+- `tipo_datos` identifica la clase de contenido procesado y `identificador_fuente` conserva el identificador estable o descriptivo proporcionado para el recurso.
+- La combinación `(fuente_importacion_id, identificador_fuente)` dispone de un índice normal, no de una restricción única. Esto permite registrar varios intentos, incluidos reintentos tras un fallo, sobre el mismo recurso externo.
+- `url_fuente`, `hash_sha256` y `fecha_datos` conservan procedencia y versión cuando estén disponibles. El hash opcional debe contener exactamente 64 caracteres hexadecimales.
+- `iniciado_en` es obligatorio y `finalizado_en` es opcional, pero no puede ser anterior al inicio.
+- `estado` conserva el resultado o fase del lote. `tipo_datos` y `estado` se almacenan como texto para que la futura capa de importación defina sus valores sin convertirlos prematuramente en enums cerrados.
+- Los contadores distinguen registros disponibles, procesados, insertados, actualizados, omitidos, advertencias y errores. Todos los contadores presentes deben ser no negativos.
+- Las relaciones con `fuente_importacion` e `idioma` usan `ON DELETE RESTRICT` para conservar la trazabilidad de los lotes.
+
+Incidencias:
+
+- Cada `incidencia_importacion` pertenece obligatoriamente a un lote y puede representar información, una advertencia o un error detectado durante su procesamiento.
+- `severidad`, `codigo`, `mensaje` y `creado_en` son obligatorios.
+- `referencia_fuente` permite localizar opcionalmente el registro original y `entidad_destino` describe el destino previsto sin crear una foreign key polimórfica ni acoplar la auditoría a una tabla concreta.
+- `detalle` conserva contexto ampliado cuando sea necesario.
+- Al eliminar deliberadamente un lote, sus incidencias se eliminan mediante `ON DELETE CASCADE`.
+
+Entidades Java relacionadas:
+
+- `FuenteImportacion`
+- `LoteImportacion`
+- `IncidenciaImportacion`
+- `Idioma`
+
+Las relaciones Java hacia la fuente, el idioma y el lote usan carga `LAZY`. No se añaden cascadas JPA, `orphanRemoval` ni relaciones bidireccionales innecesarias; los comportamientos de borrado permanecen definidos por Flyway y MySQL.
+
 ## Decisiones del dominio
 
 `Carta` representa la identidad funcional única de una carta por código oficial: nombre general, categoría, rareza base, icono de bloque y límite de copias. `SeccionCarta` representa cada parte funcional de esa carta. Una carta normal suele tener una sección; una carta `DUAL` puede tener varias secciones, cada una con su categoría concreta.
@@ -603,6 +648,16 @@ Los pares prohibidos se modelan aparte porque expresan incompatibilidad entre do
 La existencia de una errata en una `Carta` no implica que todas sus impresiones contengan el error. `ErrataImpresionCarta` se utiliza exclusivamente cuando una variante física concreta muestra el texto incorrecto. De este modo, una reimpresión corregida comparte la identidad y el historial oficial sin aparecer entre las impresiones afectadas.
 
 La propagación general de erratas entre variantes ofrecida por una fuente externa debe validarse antes de crear relaciones físicas. Ante datos insuficientes, se conserva la errata oficial sin atribuir el error a impresiones concretas.
+
+### Auditoría de importaciones
+
+`FuenteImportacion`, `LoteImportacion` e `IncidenciaImportacion` forman una capa de trazabilidad separada del modelo funcional de las cartas. Registrar un lote no significa que sus datos se hayan importado correctamente: el estado, las fechas, los contadores y las incidencias describen el resultado real de cada ejecución.
+
+El identificador de un recurso externo no identifica de forma única un lote. Una misma fuente y un mismo `identificador_fuente` pueden aparecer en varias ejecuciones, lo que permite conservar intentos fallidos, reintentos y análisis repetidos sin sobrescribir el historial.
+
+El idioma del lote es opcional y contextualiza el recurso procesado cuando corresponda; no cambia la decisión de mantener en inglés el contenido funcional canónico. Las incidencias pueden mencionar una referencia de origen y una entidad de destino, pero no establecen relaciones directas con las entidades del catálogo.
+
+V13 prepara la auditoría que utilizará el futuro importador. El cliente de Heroicc, el análisis de sus respuestas, las reglas de conversión y la escritura de cartas continúan fuera del estado implementado actual.
 
 ### Criterios de interpretación del texto oficial
 
@@ -876,6 +931,47 @@ erDiagram
         TEXT notas
     }
 
+    fuente_importacion {
+        BIGINT id PK
+        VARCHAR codigo UK
+        VARCHAR nombre UK
+        VARCHAR url_base
+    }
+
+    lote_importacion {
+        BIGINT id PK
+        BIGINT fuente_importacion_id FK
+        BIGINT idioma_id FK
+        VARCHAR tipo_datos
+        VARCHAR identificador_fuente
+        VARCHAR url_fuente
+        CHAR hash_sha256
+        DATE fecha_datos
+        DATETIME iniciado_en
+        DATETIME finalizado_en
+        VARCHAR estado
+        INT total_registros_fuente
+        INT total_registros_procesados
+        INT total_inserciones
+        INT total_actualizaciones
+        INT total_omisiones
+        INT total_advertencias
+        INT total_errores
+        TEXT notas
+    }
+
+    incidencia_importacion {
+        BIGINT id PK
+        BIGINT lote_importacion_id FK
+        VARCHAR severidad
+        VARCHAR codigo
+        VARCHAR referencia_fuente
+        VARCHAR entidad_destino
+        VARCHAR mensaje
+        TEXT detalle
+        DATETIME creado_en
+    }
+
     carta ||--o{ seccion_carta : contiene
     forma_carta o|--o{ seccion_carta : forma_propia
     seccion_carta ||--o{ seccion_carta_rasgo : tiene
@@ -911,4 +1007,7 @@ erDiagram
     bloque_texto o|--o{ errata_carta : localiza
     errata_carta ||--o{ errata_impresion_carta : afecta_fisicamente
     impresion_carta ||--o{ errata_impresion_carta : contiene_error
+    fuente_importacion ||--o{ lote_importacion : origina
+    idioma o|--o{ lote_importacion : contextualiza
+    lote_importacion ||--o{ incidencia_importacion : registra
 ```
