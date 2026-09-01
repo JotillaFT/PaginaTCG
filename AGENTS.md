@@ -25,7 +25,7 @@
 - Backend confirmado: Spring Boot 4.1.1, Java 25, Gradle 9.5.1 y MySQL 8.4 en Docker.
 - Puertos actuales: backend `8080` y MySQL del host `3307`.
 - Flyway y Hibernate deben validar el esquema; la aplicación no debe modificarlo automáticamente. Mantén el modo de Hibernate equivalente a `validate`.
-- La base implementada, aplicada y validada actualmente llega de V1 a V11. `V11__crear_restricciones_competitivas.sql` ya está aplicada y no debe modificarse, ni siquiera en formato, espacios, comentarios o salto de línea final. Las migraciones anteriores también son inmutables. Para cambiar el modelo, crea una migración nueva desde V12 o desde el siguiente número disponible tras verificar el directorio real.
+- La base implementada, aplicada y validada actualmente llega de V1 a V12. `V12__crear_erratas.sql` ya está aplicada y no debe modificarse, ni siquiera en formato, espacios, comentarios o salto de línea final. Las migraciones anteriores también son inmutables. Para cambiar el modelo, crea una migración nueva desde V13 o desde el siguiente número disponible tras verificar el directorio real.
 - En Windows, los tests del backend han funcionado usando `GRADLE_USER_HOME=C:\GradleHome`.
 - No trates los avisos de conversión entre LF y CRLF como errores funcionales. Aun así, `git diff --check` debe terminar sin errores reales de espacios o marcadores.
 
@@ -72,6 +72,16 @@
 - `Ilustrador` cataloga el nombre de crédito. Una impresión puede tener cero, uno o varios ilustradores y `ImpresionCartaIlustrador.orden` conserva el orden oficial del crédito.
 - Heroicc no documenta actualmente el ilustrador como campo; su importación necesitará otra fuente o una extracción posterior desde la imagen.
 - El frontend podrá mostrar solo la impresión base o todas las variantes. Las futuras colecciones y mazos podrán señalar la `ImpresionCarta` concreta que posee o utiliza el usuario.
+
+### Erratas
+
+- `ErrataCarta` representa una corrección oficial o histórica asociada a la identidad funcional de una `Carta`, no a una impresión concreta.
+- Una errata puede señalar opcionalmente la `SeccionCarta` o el `BloqueTexto` afectados cuando la fuente permita identificarlos sin inventar datos.
+- El texto funcional canónico mostrado y utilizado para búsquedas debe ser el texto oficial corregido. `textoError` y `textoCorreccion` conservan la diferencia histórica para explicar posibles discrepancias con imágenes antiguas.
+- `ErrataImpresionCarta` relaciona una errata únicamente con las `ImpresionCarta` que contienen físicamente el error. Una reimpresión corregida conserva el historial de la carta sin quedar marcada como impresión errónea.
+- No interpretes automáticamente una errata propagada por Heroicc a todas las variantes del mismo código como evidencia de que todas las impresiones físicas están afectadas. Importa el historial oficial en `ErrataCarta` y crea relaciones físicas solo cuando exista evidencia suficiente.
+- `errata_carta.carta_id` usa `ON DELETE CASCADE`; sus referencias opcionales a sección y bloque usan `ON DELETE SET NULL`. Las relaciones de `errata_impresion_carta` usan `ON DELETE CASCADE`. Estos comportamientos pertenecen a Flyway y MySQL.
+- La estructura de erratas ya está implementada desde V12; siguen pendientes la importación, la validación de impresiones afectadas y su presentación en el frontend.
 
 ### Forma, atributo, rasgos y colores
 

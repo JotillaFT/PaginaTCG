@@ -18,8 +18,8 @@ Implementado actualmente:
 - Backend Spring Boot en `backend/`.
 - Configuración de MySQL mediante Docker Compose.
 - Flyway como gestor de migraciones.
-- Migraciones V1 a V11 implementadas, aplicadas y validadas para el modelo de cartas.
-- Entidades JPA para el contenido funcional de las cartas, sus requisitos de evolución, Link, idiomas, impresiones, lanzamientos, ilustradores y restricciones competitivas.
+- Migraciones V1 a V12 implementadas, aplicadas y validadas para el modelo de cartas.
+- Entidades JPA para el contenido funcional de las cartas, sus requisitos de evolución, Link, idiomas, impresiones, lanzamientos, ilustradores, restricciones competitivas y erratas.
 - `CartaRepository`, basado en `JpaRepository<Carta, Long>`.
 - Búsqueda derivada `findByCodigo(String codigo)`.
 - Tests de integración básicos con Spring Boot y MySQL real.
@@ -33,7 +33,7 @@ No implementado todavía:
 - Controladores REST o endpoints de cartas.
 - Frontend Angular funcional. Existe una carpeta `frontend/`, pero actualmente no contiene una implementación.
 - Autenticación, usuarios, colecciones personales o mazos.
-- Datos reales de restricciones competitivas o erratas completas.
+- Datos reales importados de restricciones competitivas o erratas.
 
 ## Objetivos y alcance
 
@@ -204,7 +204,7 @@ Esto implica:
 - Hibernate solo valida que las entidades coincidan con el esquema de MySQL.
 - Hibernate no debe crear ni alterar automáticamente el esquema.
 - Una migración aplicada no se edita.
-- Los cambios posteriores se hacen con nuevas migraciones, por ejemplo `V12`, `V13`, etc.
+- Los cambios posteriores se hacen con nuevas migraciones, por ejemplo `V13`, `V14`, etc.
 
 Esta decisión es central para mantener controlado el modelo de datos desde las primeras fases del proyecto.
 
@@ -223,6 +223,7 @@ Esta decisión es central para mantener controlado el modelo de datos desde las 
 - `V9__crear_impresiones_y_lanzamientos.sql`: crea `idioma`, `lanzamiento`, `impresion_carta`, `impresion_carta_lanzamiento`, `ilustrador` e `impresion_carta_ilustrador` para separar la identidad funcional de una carta de sus variantes físicas o gráficas.
 - `V10__crear_informacion_link.sql`: crea `informacion_link`, `requisito_link` y `requisito_link_rasgo` para separar la estructura de la mecánica Link, sus requisitos y los efectos funcionales conservados en `bloque_texto`.
 - `V11__crear_restricciones_competitivas.sql`: crea el catálogo `tipo_restriccion_competitiva`, las restricciones individuales de `restriccion_competitiva_carta` y los pares prohibidos de `restriccion_pareja`.
+- `V12__crear_erratas.sql`: crea `errata_carta` para conservar correcciones oficiales de la carta funcional y `errata_impresion_carta` para identificar las impresiones físicas concretas que contienen el texto erróneo.
 
 ### Entidades y enums
 
@@ -254,6 +255,8 @@ Entidades actuales:
 - `TipoRestriccionCompetitiva`
 - `RestriccionCompetitivaCarta`
 - `RestriccionPareja`
+- `ErrataCarta`
+- `ErrataImpresionCarta`
 
 Enums actuales:
 
@@ -461,6 +464,27 @@ erDiagram
         TEXT nota
     }
 
+    errata_carta {
+        BIGINT id PK
+        BIGINT carta_id FK
+        BIGINT seccion_carta_id FK
+        BIGINT bloque_texto_id FK
+        DATE fecha
+        INT orden
+        VARCHAR ubicacion
+        TEXT texto_error
+        TEXT texto_correccion
+        TEXT notas
+        VARCHAR url_fuente
+    }
+
+    errata_impresion_carta {
+        BIGINT id PK
+        BIGINT errata_carta_id FK
+        BIGINT impresion_carta_id FK
+        TEXT notas
+    }
+
     carta ||--o{ seccion_carta : contiene
     forma_carta o|--o{ seccion_carta : forma_propia
     seccion_carta ||--o{ seccion_carta_rasgo : tiene
@@ -491,6 +515,11 @@ erDiagram
     tipo_restriccion_competitiva ||--o{ restriccion_competitiva_carta : clasifica
     carta ||--o{ restriccion_pareja : carta_a
     carta ||--o{ restriccion_pareja : carta_b
+    carta ||--o{ errata_carta : tiene_historial
+    seccion_carta o|--o{ errata_carta : concreta
+    bloque_texto o|--o{ errata_carta : localiza
+    errata_carta ||--o{ errata_impresion_carta : afecta_fisicamente
+    impresion_carta ||--o{ errata_impresion_carta : contiene_error
 ```
 
 ## Decisiones principales del modelo
@@ -536,6 +565,10 @@ erDiagram
 - El histórico se conserva mediante filas para periodos distintos. La coherencia entre tipo y máximo y los posibles solapamientos se validarán en el futuro importador o capa de escritura, sin triggers SQL.
 - `RestriccionPareja` representa dos códigos que no pueden usarse simultáneamente en un mazo, sin reducir necesariamente su máximo individual. `carta_a_id < carta_b_id` impide autorrelaciones y mantiene una representación canónica del par.
 - Las relaciones Java de V11 usan carga `LAZY` y no añaden cascadas JPA, `orphanRemoval` ni relaciones bidireccionales innecesarias. Los comportamientos `ON DELETE` siguen definidos por Flyway y MySQL.
+- `ErrataCarta` conserva la corrección oficial e histórica asociada a una `Carta`. Puede localizar opcionalmente la `SeccionCarta` o el `BloqueTexto` afectados sin inventar esa precisión cuando la fuente no la proporciona.
+- El texto funcional canónico mostrado y utilizado para búsquedas debe ser el texto oficial corregido. La errata conserva el texto erróneo y su corrección para explicar por qué una imagen antigua puede no coincidir con el contenido actual.
+- `ErrataImpresionCarta` relaciona una errata con las `ImpresionCarta` que contienen físicamente el error. Una reimpresión corregida conserva el historial de la carta sin quedar marcada como impresión errónea.
+- Las asociaciones de erratas propagadas por una fuente externa a todas las variantes de un mismo código no se aceptarán automáticamente como evidencia física; la futura importación deberá distinguir el historial oficial de las impresiones realmente afectadas.
 
 ## Fuente de datos prevista
 
@@ -559,6 +592,7 @@ Tratamiento previsto de algunos campos:
 - Heroicc no documenta actualmente el ilustrador como campo; esos créditos necesitarán otra fuente o una extracción posterior desde la imagen.
 - La estructura Link ya existe, pero la importación de bonificaciones, requisitos, costes y rasgos admitidos desde la fuente externa sigue pendiente.
 - La estructura de restricciones competitivas ya existe, pero la importación de periodos reales, límites y pares prohibidos desde la fuente externa sigue pendiente.
+- La estructura de erratas ya existe, pero su importación deberá separar las correcciones oficiales de las impresiones físicas afectadas y contrastar la propagación de variantes realizada por la fuente.
 
 ## Roadmap
 
@@ -576,7 +610,8 @@ Planificado, pero no implementado todavía:
 - Población del catálogo inicial de palabras clave, detección/importación de palabras clave propias y uso de esas relaciones en filtros.
 - Localización textual de palabras clave mencionadas, concedidas, eliminadas, negadas o usadas como condición.
 - Importación y validación de restricciones competitivas individuales y pares prohibidos desde la fuente externa.
-- Erratas y texto corregido.
+- Importación y validación del histórico oficial de erratas y de las impresiones físicas realmente afectadas.
+- Presentación en el frontend del texto oficial corregido junto con la explicación de la errata cuando una imagen antigua no coincida.
 - API REST para consulta de cartas.
 - Frontend Angular para búsqueda avanzada.
 - Usuarios, colecciones personales y mazos como módulos posteriores.

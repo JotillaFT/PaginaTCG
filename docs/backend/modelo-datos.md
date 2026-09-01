@@ -12,7 +12,7 @@ spring.jpa.hibernate.ddl-auto=validate
 
 Esto significa que Hibernate valida que las entidades coincidan con el esquema, pero no crea, modifica ni elimina tablas. Las migraciones ya aplicadas son inmutables: no se editan para cambiar formato, comentarios, restricciones o sentencias, porque eso alteraría el checksum de Flyway.
 
-El estado actual llega hasta `V11__crear_restricciones_competitivas.sql`. Las migraciones V1 a V11 están implementadas, aplicadas y validadas y no deben modificarse. El siguiente cambio de esquema deberá comenzar en `V12` o en la siguiente versión que corresponda según el estado real del repositorio.
+El estado actual llega hasta `V12__crear_erratas.sql`. Las migraciones V1 a V12 están implementadas, aplicadas y validadas y no deben modificarse. El siguiente cambio de esquema deberá comenzar en `V13` o en la siguiente versión que corresponda según el estado real del repositorio.
 
 ## Migraciones
 
@@ -497,6 +497,47 @@ Entidades Java relacionadas:
 - `RestriccionPareja`
 - `Carta`
 
+### V12__crear_erratas.sql
+
+Separa el historial oficial de correcciones de una carta funcional de las impresiones físicas concretas que contienen el texto erróneo.
+
+Tablas creadas:
+
+- `errata_carta`
+- `errata_impresion_carta`
+
+Errata oficial de la carta:
+
+- Cada `ErrataCarta` pertenece obligatoriamente a una `Carta` y representa una corrección oficial o histórica de su contenido funcional.
+- `seccion_carta_id` y `bloque_texto_id` son opcionales. Permiten localizar la parte afectada cuando la fuente aporta esa precisión, pero permanecen `NULL` cuando no puede determinarse sin inventar datos.
+- `fecha` y `orden` identifican y ordenan las erratas de una carta; la combinación `(carta_id, fecha, orden)` es única.
+- `ubicacion` describe opcionalmente la parte corregida.
+- `texto_error` conserva el texto incorrecto y `texto_correccion` el texto oficial corregido; ambos son obligatorios y no pueden quedar vacíos.
+- `notas` y `url_fuente` permiten conservar contexto y procedencia cuando estén disponibles.
+- Al eliminar una `Carta`, sus erratas se eliminan con `ON DELETE CASCADE`. Si desaparecen la sección o el bloque referenciados, sus foreign keys pasan a `NULL` para conservar el historial de la corrección.
+
+Impresiones físicas afectadas:
+
+- `ErrataImpresionCarta` relaciona una `ErrataCarta` con cada `ImpresionCarta` que contiene físicamente el error.
+- La combinación `(errata_carta_id, impresion_carta_id)` es única y puede incluir una nota específica de la impresión.
+- Una reimpresión corregida sigue perteneciendo a la misma `Carta` y conserva su historial de errata, pero no crea una fila en `errata_impresion_carta`.
+- Las dos foreign keys usan `ON DELETE CASCADE` para eliminar relaciones huérfanas.
+
+Texto funcional y fuentes externas:
+
+- El texto funcional canónico mostrado por la aplicación y utilizado para búsquedas debe ser el texto oficial corregido. La errata explica por qué ese contenido puede no coincidir con la imagen de una impresión antigua.
+- Heroicc parece propagar una errata a todas las variantes del mismo número funcional, incluidas posibles reimpresiones posteriores. La futura importación no debe interpretar automáticamente esa propagación como prueba de que todas las impresiones contienen físicamente el error.
+- El historial oficial se importará en `errata_carta`; las relaciones de `errata_impresion_carta` requerirán evidencia suficiente sobre cada variante física.
+
+Entidades Java relacionadas:
+
+- `ErrataCarta`
+- `ErrataImpresionCarta`
+- `Carta`
+- `SeccionCarta`
+- `BloqueTexto`
+- `ImpresionCarta`
+
 ## Decisiones del dominio
 
 `Carta` representa la identidad funcional única de una carta por código oficial: nombre general, categoría, rareza base, icono de bloque y límite de copias. `SeccionCarta` representa cada parte funcional de esa carta. Una carta normal suele tener una sección; una carta `DUAL` puede tener varias secciones, cada una con su categoría concreta.
@@ -554,6 +595,14 @@ El catálogo `TipoRestriccionCompetitiva` conserva la clase oficial de la decisi
 Los periodos conservan histórico. `fechaInicio` marca el primer día de vigencia y `fechaFin`, cuando existe, el primer día sin vigencia. No se almacena la fecha de anuncio ni un evento `UNRESTRICT`; finalizar una restricción consiste en cerrar su periodo. La futura capa de escritura comprobará la correspondencia entre tipo y máximo y evitará solapamientos.
 
 Los pares prohibidos se modelan aparte porque expresan incompatibilidad entre dos códigos, no una reducción de copias individuales. El orden canónico de sus dos referencias impide guardar el mismo par en ambas direcciones.
+
+### Erratas oficiales e impresiones afectadas
+
+`ErrataCarta` describe el cambio oficial de texto en la identidad funcional y puede señalar opcionalmente la sección o el bloque afectados. El contenido funcional canónico debe conservar ya la redacción corregida; `textoError` y `textoCorreccion` documentan la diferencia histórica y permiten explicarla al usuario.
+
+La existencia de una errata en una `Carta` no implica que todas sus impresiones contengan el error. `ErrataImpresionCarta` se utiliza exclusivamente cuando una variante física concreta muestra el texto incorrecto. De este modo, una reimpresión corregida comparte la identidad y el historial oficial sin aparecer entre las impresiones afectadas.
+
+La propagación general de erratas entre variantes ofrecida por una fuente externa debe validarse antes de crear relaciones físicas. Ante datos insuficientes, se conserva la errata oficial sin atribuir el error a impresiones concretas.
 
 ### Criterios de interpretación del texto oficial
 
@@ -806,6 +855,27 @@ erDiagram
         TEXT nota
     }
 
+    errata_carta {
+        BIGINT id PK
+        BIGINT carta_id FK
+        BIGINT seccion_carta_id FK
+        BIGINT bloque_texto_id FK
+        DATE fecha
+        INT orden
+        VARCHAR ubicacion
+        TEXT texto_error
+        TEXT texto_correccion
+        TEXT notas
+        VARCHAR url_fuente
+    }
+
+    errata_impresion_carta {
+        BIGINT id PK
+        BIGINT errata_carta_id FK
+        BIGINT impresion_carta_id FK
+        TEXT notas
+    }
+
     carta ||--o{ seccion_carta : contiene
     forma_carta o|--o{ seccion_carta : forma_propia
     seccion_carta ||--o{ seccion_carta_rasgo : tiene
@@ -836,4 +906,9 @@ erDiagram
     tipo_restriccion_competitiva ||--o{ restriccion_competitiva_carta : clasifica
     carta ||--o{ restriccion_pareja : carta_a
     carta ||--o{ restriccion_pareja : carta_b
+    carta ||--o{ errata_carta : tiene_historial
+    seccion_carta o|--o{ errata_carta : concreta
+    bloque_texto o|--o{ errata_carta : localiza
+    errata_carta ||--o{ errata_impresion_carta : afecta_fisicamente
+    impresion_carta ||--o{ errata_impresion_carta : contiene_error
 ```
